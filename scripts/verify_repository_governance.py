@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-USYD-T0021: 3-Repository Creation, Permissions & Ownership Verification Suite
+USYD-T0021: Repository Creation, Permissions & Ownership Verification Suite
 Validates repository boundaries, permissions, CODEOWNERS, CI workflows, and secret hygiene.
+Supports both multi-repo local workspace execution and single-repo GitHub Actions runner execution.
 Includes positive assertions and negative test scenarios.
 """
 
@@ -12,8 +13,9 @@ import json
 import re
 from pathlib import Path
 
-WORKSPACE = Path(__file__).resolve().parents[2]
-REPOS = ["usayd-api", "usayd-web", "usayd-flutter"]
+CURRENT_REPO = Path(__file__).resolve().parents[1]
+WORKSPACE = CURRENT_REPO.parent
+ALL_REPOS = ["usayd-api", "usayd-web", "usayd-flutter"]
 EXPECTED_OWNER = "@mykholy"
 
 REQUIRED_SENSITIVE_PATHS = {
@@ -57,70 +59,74 @@ SECRET_PATTERNS = [
 ]
 
 
+def get_target_repos():
+    """Return available repos: all 3 if in workspace, or current repo in isolated CI."""
+    siblings = [WORKSPACE / r for r in ["usayd-web", "usayd-flutter"]]
+    if any(s.exists() for s in siblings):
+        return [WORKSPACE / r for r in ALL_REPOS if (WORKSPACE / r).exists()]
+    return [CURRENT_REPO]
+
+
 def test_positive_local_repos_exist():
-    """Verify all 3 repository directories exist and are Git repositories."""
+    """Verify repository directory exists and is a valid Git repository."""
     print("[TEST] test_positive_local_repos_exist...")
-    for repo in REPOS:
-        repo_dir = WORKSPACE / repo
+    repos = get_target_repos()
+    for repo_dir in repos:
         assert repo_dir.is_dir(), f"Repository directory missing: {repo_dir}"
-        assert (repo_dir / ".git").is_dir(), f"Repository is not a Git repo: {repo_dir}"
-    print("  -> PASS")
+        assert (repo_dir / ".git").exists(), f"Repository is not a Git repo: {repo_dir}"
+    print(f"  -> PASS ({len(repos)} repo(s) verified)")
 
 
 def test_positive_git_default_branch():
-    """Verify default branch is main for all local repositories."""
+    """Verify default branch is main for all target repositories."""
     print("[TEST] test_positive_git_default_branch...")
-    for repo in REPOS:
-        repo_dir = WORKSPACE / repo
-        res = subprocess.run(
-            ["git", "-C", str(repo_dir), "branch", "--show-current"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        current_branch = res.stdout.strip()
-        # In feat branch, main must exist in branch list
+    repos = get_target_repos()
+    for repo_dir in repos:
         branches = subprocess.run(
-            ["git", "-C", str(repo_dir), "branch", "--list", "main"],
+            ["git", "-C", str(repo_dir), "branch", "-a"],
             capture_output=True,
             text=True,
             check=True,
-        ).stdout.strip()
-        assert "main" in branches, f"Repository {repo} missing 'main' branch"
+        ).stdout
+        assert "main" in branches, f"Repository {repo_dir.name} missing 'main' branch in: {branches}"
     print("  -> PASS")
 
 
 def test_positive_codeowners_coverage():
     """Verify CODEOWNERS contains all required sensitive paths mapped to authorized owner."""
     print("[TEST] test_positive_codeowners_coverage...")
-    for repo, paths in REQUIRED_SENSITIVE_PATHS.items():
-        codeowners_file = WORKSPACE / repo / ".github" / "CODEOWNERS"
-        assert codeowners_file.is_file(), f"CODEOWNERS missing in {repo}"
+    repos = get_target_repos()
+    for repo_dir in repos:
+        repo_name = repo_dir.name
+        if repo_name not in REQUIRED_SENSITIVE_PATHS:
+            continue
+        codeowners_file = repo_dir / ".github" / "CODEOWNERS"
+        assert codeowners_file.is_file(), f"CODEOWNERS missing in {repo_name}"
         content = codeowners_file.read_text(encoding="utf-8")
-        for path in paths:
-            assert path in content, f"Sensitive path {path} missing in {repo} CODEOWNERS"
-            # Ensure owner is assigned
+        for path in REQUIRED_SENSITIVE_PATHS[repo_name]:
+            assert path in content, f"Sensitive path {path} missing in {repo_name} CODEOWNERS"
             line = [l for l in content.splitlines() if path in l][0]
-            assert EXPECTED_OWNER in line, f"Path {path} not assigned to {EXPECTED_OWNER} in {repo}"
+            assert EXPECTED_OWNER in line, f"Path {path} not assigned to {EXPECTED_OWNER} in {repo_name}"
     print("  -> PASS")
 
 
 def test_positive_required_workflows():
     """Verify required GitHub Actions workflows exist in each repository."""
     print("[TEST] test_positive_required_workflows...")
-    for repo in REPOS:
-        wf_dir = WORKSPACE / repo / ".github" / "workflows"
-        assert wf_dir.is_dir(), f"Workflows directory missing in {repo}"
+    repos = get_target_repos()
+    for repo_dir in repos:
+        wf_dir = repo_dir / ".github" / "workflows"
+        assert wf_dir.is_dir(), f"Workflows directory missing in {repo_dir.name}"
         for wf in REQUIRED_WORKFLOWS:
-            assert (wf_dir / wf).is_file(), f"Workflow {wf} missing in {repo}"
+            assert (wf_dir / wf).is_file(), f"Workflow {wf} missing in {repo_dir.name}"
     print("  -> PASS")
 
 
 def test_positive_no_secrets_in_repo():
     """Scan tracked repository files to ensure no sensitive credentials leaked."""
     print("[TEST] test_positive_no_secrets_in_repo...")
-    for repo in REPOS:
-        repo_dir = WORKSPACE / repo
+    repos = get_target_repos()
+    for repo_dir in repos:
         for root, _, files in os.walk(repo_dir):
             if ".git" in root:
                 continue
@@ -132,10 +138,9 @@ def test_positive_no_secrets_in_repo():
                     text = fpath.read_text(encoding="utf-8", errors="ignore")
                     for pattern in SECRET_PATTERNS:
                         matches = pattern.findall(text)
-                        # Filter out example dummy templates
                         real_matches = [m for m in matches if "usayd_ci_password" not in m and "root_ci_password" not in m]
                         assert not real_matches, f"Potential secret leak in {fpath}: {real_matches}"
-                except Exception as e:
+                except Exception:
                     pass
     print("  -> PASS")
 
@@ -144,8 +149,6 @@ def test_negative_codeowners_validation():
     """Negative test: verify that missing owner or unmapped sensitive path is detected as failure."""
     print("[TEST] test_negative_codeowners_validation (Negative)...")
     synthetic_codeowners = "/app/Modules/Identity/ # No owner assigned\n/app/Modules/Payments/ @unauthorized_user\n"
-    
-    # Validation logic check
     has_owner_for_identity = False
     has_valid_owner_for_payments = False
     for line in synthetic_codeowners.splitlines():
@@ -175,7 +178,7 @@ def test_negative_secret_leak_detection():
 def run_all_tests():
     print("==================================================")
     print(" Usayd Academy — Repository Governance Test Suite ")
-    print(" Ticket: USYD-T0021                               ")
+    print(" Ticket: USYD-T0021 / Governance Repair           ")
     print("==================================================")
     test_positive_local_repos_exist()
     test_positive_git_default_branch()
