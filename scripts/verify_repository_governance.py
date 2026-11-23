@@ -2,7 +2,7 @@
 """
 USYD-T0021: Repository Creation, Permissions & Ownership Verification Suite
 Validates repository boundaries, permissions, CODEOWNERS, CI workflows, and secret hygiene.
-Supports both multi-repo local workspace execution and single-repo GitHub Actions runner execution.
+Supports multi-repo local workspace execution and single-repo GitHub Actions runner execution (including detached PR HEAD).
 Includes positive assertions and negative test scenarios.
 """
 
@@ -88,7 +88,15 @@ def test_positive_git_default_branch():
             text=True,
             check=True,
         ).stdout
-        assert "main" in branches, f"Repository {repo_dir.name} missing 'main' branch in: {branches}"
+        if "main" in branches:
+            continue
+        # In detached HEAD (e.g. GitHub Actions pull_request event), verify remote main exists
+        remotes = subprocess.run(
+            ["git", "-C", str(repo_dir), "ls-remote", "--heads", "origin", "main"],
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert "refs/heads/main" in remotes, f"Repository {repo_dir.name} missing 'main' branch in branches: {branches} and remotes: {remotes}"
     print("  -> PASS")
 
 
