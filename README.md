@@ -61,4 +61,24 @@ bash scripts/check-openapi.sh
 
 # Verify architecture domain boundaries
 python scripts/verify_architecture_boundaries.py
+
+# Verify MySQL 8.4 database foundations & anti-PostgreSQL rules
+python scripts/verify_database_foundations.py
 ```
+
+---
+
+## 5. Database Architecture & Foundations (MySQL 8.4 LTS)
+Detailed in [`docs/architecture/DATABASE_FOUNDATIONS.md`](docs/architecture/DATABASE_FOUNDATIONS.md).
+- **Engine:** InnoDB strictly enforced; MyISAM/MEMORY prohibited.
+- **Charset & Collation:** `utf8mb4` with `utf8mb4_unicode_ci` (full Arabic Tashkeel & 4-byte emoji support).
+- **Strict SQL Mode:** Enforces `ONLY_FULL_GROUP_BY`, `STRICT_TRANS_TABLES`, `NO_ZERO_IN_DATE`, `NO_ZERO_DATE`, `ERROR_FOR_DIVISION_BY_ZERO`, `NO_ENGINE_SUBSTITUTION`.
+- **Foundations Schema (Module 0):**
+  - `audit_events`: Append-only compliance and event log.
+  - `outbox_messages`: Transactional outbox pattern for guaranteed eventual consistency.
+  - `idempotency_keys`: Mutation idempotency protection.
+  - `settings_versions`: Versioned system configuration.
+  - `feature_flags`: Progressive delivery flags.
+- **Rollback Verification:** Every migration requires a tested `down()` rollback method.
+- **Anti-PostgreSQL Linter:** Prohibits non-portable Postgres-specific syntax.
+

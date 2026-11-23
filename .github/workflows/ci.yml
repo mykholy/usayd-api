@@ -95,6 +95,10 @@ jobs:
         if: steps.state.outputs.is_bootstrapped == 'true'
         run: ./vendor/bin/pint --test
 
+      - name: Verify database foundations & anti-PostgreSQL rules
+        if: steps.state.outputs.is_bootstrapped == 'true'
+        run: python scripts/verify_database_foundations.py
+
       - name: Execute Pest / PHPUnit test suite
         if: steps.state.outputs.is_bootstrapped == 'true'
         run: php artisan test
