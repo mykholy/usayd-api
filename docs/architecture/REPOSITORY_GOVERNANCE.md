@@ -1,8 +1,8 @@
 # Usayd Academy — Repository Governance & Permissions Architecture
 
-> **Ticket:** USYD-T0021  
+> **Ticket:** USYD-T0021 / Governance Repair  
 > **Epic:** USYD-E-FOUNDATION  
-> **Classification:** Engineering Governance  
+> **Classification:** Engineering Governance & Safety Gates  
 
 ---
 
@@ -30,10 +30,28 @@ Usayd Academy Workspace
 - **Feature Branch Pattern:** `feat/USYD-T####-short-slug` or `fix/USYD-T####-short-slug`.
 - **Commit Standards:** Conventional Commits (`feat:`, `fix:`, `chore:`, `test:`, `docs:`).
 - **Pull Request Rules:** Every change requires a dedicated Pull Request linked to an authoritative task ID.
+- **Merge Restrictions:** No PR may be merged when required checks are failing. Unattended CLI merges bypassing check gates are strictly prohibited.
 
 ---
 
-## 3. CODEOWNERS and Approval Gates
+## 3. Governance Gates & Verification Triad
+
+To ensure full accountability and safety, three distinct review layers are enforced:
+
+| Gate | Mechanism | Purpose | Authority |
+|---|---|---|---|
+| **1. Automated CI Checks** | GitHub Actions (`ci.yml`) | Validates test execution, syntax, linting, database migrations, and contracts on real MySQL 8.4 + Redis. | Machine gate (hard requirement) |
+| **2. Independent AI Review** | `ai-review.yml` / `pr_review.py` | Advisory code quality analysis, diff size checking, secret scanning. | Advisory feedback only (**NEVER counts as approval**) |
+| **3. Genuine Human Approval** | `human-review-gate.yml` / CODEOWNERS | Verification of business logic, safety, minor protection, and data integrity by authorized leads. | Human gate (mandatory for sensitive changes) |
+
+### Non-Negotiable Review Invariants
+1. **AI Review Never Approves:** An AI review (whether passed, inconclusive, failed, or unavailable) **never** constitutes human approval.
+2. **Fail-Closed on Unconfigured Review:** If `GEMINI_API_KEY` or `ALLOW_EXTERNAL_AI_REVIEW` is not configured, the review is marked `UNAVAILABLE`. It never auto-approves.
+3. **No Phantom Passes:** CI checks must never simulate or fake success. During pre-bootstrap phases, CI executes structural and governance validations; once `composer.json` is committed, full Laravel + MySQL test suites are strictly enforced.
+
+---
+
+## 4. CODEOWNERS and Sensitive Paths
 
 Each repository maintains a `.github/CODEOWNERS` configuration mapping sensitive domains to `@mykholy`:
 
@@ -52,15 +70,8 @@ Each repository maintains a `.github/CODEOWNERS` configuration mapping sensitive
 
 ---
 
-## 4. Automation and CI Verification Gates
+## 5. Branch Protection Plan Constraint & Auto-Merge Policy
 
-1. **API Quality CI (`ci.yml`):**
-   - Syntax & formatting: `laravel pint --test`
-   - Static analysis: PHPStan / Larastan
-   - Unit & integration tests: Pest PHP backed by real MySQL 8.4 and Redis
-   - Schema validation: `check-openapi.sh`
-2. **AI Code Review Gate (`ai-review.yml` / `pr_review.py`):**
-   - Reviews diff against acceptance criteria, security invariants, and performance standards.
-   - Advisory check only; cannot substitute for human approval.
-3. **Safe Auto-Merge (`safe-automerge.yml`):**
-   - Applies only to low-risk changes (documentation, non-sensitive fixtures) with 100% green checks and zero blocking findings.
+- **Current Plan Limitation:** Native GitHub branch protection rules require GitHub Pro/Team or public repository visibility. On personal private repositories, GitHub API returns `HTTP 403`.
+- **Enforcement Decision:** **Unattended auto-merging is strictly disabled** (`safe-automerge.yml` fails closed).
+- **Manual Verification Required:** Every PR must be verified against actual CI runs, and PRs requiring independent approval must be submitted and held for genuine human sign-off before merging.
