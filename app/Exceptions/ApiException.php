@@ -120,4 +120,9 @@ class ApiException extends Exception
     {
         return new self(500, 'INTERNAL_ERROR', $detail);
     }
+
+    public static function serviceUnavailable(?string $detail = null, string $errorCode = 'SERVICE_UNAVAILABLE', array $extensions = []): self
+    {
+        return new self(503, $errorCode, $detail, null, [], $extensions);
+    }
 }
