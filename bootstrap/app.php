@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\AssignTraceId;
+use App\Http\Middleware\CheckFeatureFlag;
 use App\Http\Middleware\EnforceIdempotency;
 use App\Http\Middleware\EnsureRole;
 use App\Http\Middleware\RequireReasonMetadata;
@@ -31,6 +32,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'abilities' => CheckAbilities::class,
             'role' => EnsureRole::class,
             'require.reason' => RequireReasonMetadata::class,
+            'feature' => CheckFeatureFlag::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

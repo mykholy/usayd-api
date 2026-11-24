@@ -1,6 +1,7 @@
 <?php
 
 use App\Exceptions\ApiException;
+use App\Http\Controllers\Api\V1\Admin\FeatureFlagController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\HealthController;
 use App\Http\Controllers\Api\V1\QueueMetricsController;
@@ -100,6 +101,14 @@ Route::prefix('v1')->group(function () {
         })->middleware(['role:academic,admin', 'require.reason'])->name('api.v1.learning-plans.override');
     });
 
+    // Administration: Feature Flags & Kill Switches
+    Route::middleware(['auth:sanctum', 'ability:access-api', 'role:admin'])->prefix('admin/feature-flags')->group(function () {
+        Route::get('/', [FeatureFlagController::class, 'index'])->name('api.v1.admin.feature-flags.index');
+        Route::put('/{key}', [FeatureFlagController::class, 'update'])
+            ->middleware('require.reason')
+            ->name('api.v1.admin.feature-flags.update');
+    });
+
     // Test harness endpoints restricted strictly to local and testing environments
     if (app()->environment('local', 'testing')) {
         Route::post('/test/idempotent-mutation', function (Request $request) {
@@ -127,7 +136,7 @@ Route::prefix('v1')->group(function () {
             ], 201);
         })->middleware('idempotent')->name('api.v1.test.idempotent');
 
-        // Test harness endpoints for RFC 7807 error taxonomy testing
+        // Test harness endpoints for RFC 7807 error taxonomy and feature flag testing
         Route::prefix('test/errors')->group(function () {
             Route::get('/unauthorized', function () {
                 throw ApiException::unauthorized();
@@ -164,6 +173,14 @@ Route::prefix('v1')->group(function () {
                     errors: ['slot_id' => ['Slot #42 has already expired']],
                     extensions: ['availableUntil' => '2026-11-24T12:00:00Z']
                 );
+            });
+
+            Route::middleware(['feature:feature_in_app_video'])->get('/feature-protected', function () {
+                return response()->json(['status' => 'success', 'feature' => 'feature_in_app_video']);
+            });
+
+            Route::middleware(['feature:feature_in_app_video,404'])->get('/feature-hidden', function () {
+                return response()->json(['status' => 'success', 'feature' => 'feature_in_app_video']);
             });
         });
     }
