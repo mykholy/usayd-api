@@ -16,7 +16,7 @@ return new class extends Migration
         if (DB::getDriverName() === 'mysql') {
             try {
                 DB::statement('SET GLOBAL log_bin_trust_function_creators = 1;');
-            } catch (\Throwable) {
+            } catch (Throwable) {
                 // Ignore if not permitted
             }
 
@@ -40,7 +40,7 @@ return new class extends Migration
                         SET MESSAGE_TEXT = 'AuditEvent records are immutable and cannot be deleted at the database level.';
                     END;
                 ");
-            } catch (\Throwable $e) {
+            } catch (Throwable $e) {
                 if (str_contains($e->getMessage(), '1419') || str_contains($e->getMessage(), 'SUPER privilege')) {
                     logger()->warning('Audit immutability triggers could not be registered due to MySQL 1419 binlog restrictions.');
                 } else {
