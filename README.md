@@ -64,6 +64,9 @@ python scripts/verify_architecture_boundaries.py
 
 # Verify MySQL 8.4 database foundations & anti-PostgreSQL rules
 python scripts/verify_database_foundations.py
+
+# Verify concurrency control & idempotency harness
+python scripts/verify_concurrency_harness.py
 ```
 
 ---
@@ -81,4 +84,13 @@ Detailed in [`docs/architecture/DATABASE_FOUNDATIONS.md`](docs/architecture/DATA
   - `feature_flags`: Progressive delivery flags.
 - **Rollback Verification:** Every migration requires a tested `down()` rollback method.
 - **Anti-PostgreSQL Linter:** Prohibits non-portable Postgres-specific syntax.
+
+---
+
+## 6. Concurrency Control & Idempotency Harness
+Detailed in [`docs/architecture/CONCURRENCY_AND_IDEMPOTENCY.md`](docs/architecture/CONCURRENCY_AND_IDEMPOTENCY.md).
+- **Pessimistic Locking:** `SELECT FOR UPDATE` prevents lost updates and double-booking race conditions.
+- **Resilient Transactions:** `ResilientTransaction::run(...)` intercepts transient deadlocks (Error 1213) and retries with backoff.
+- **IETF Idempotency Middleware:** `EnforceIdempotency` caches mutating responses and returns `Idempotent-Replayed: true` or RFC 7807 problem details (409 Conflict, 422 Payload Mismatch).
+
 

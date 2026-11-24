@@ -99,6 +99,10 @@ jobs:
         if: steps.state.outputs.is_bootstrapped == 'true'
         run: python scripts/verify_database_foundations.py
 
+      - name: Verify concurrency & idempotency harness
+        if: steps.state.outputs.is_bootstrapped == 'true'
+        run: python scripts/verify_concurrency_harness.py
+
       - name: Execute Pest / PHPUnit test suite
         if: steps.state.outputs.is_bootstrapped == 'true'
         run: php artisan test
