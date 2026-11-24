@@ -87,6 +87,10 @@ jobs:
         if: steps.state.outputs.is_bootstrapped == 'true'
         run: cp .env.example .env && php artisan key:generate
 
+      - name: Grant MySQL privileges and enable log_bin_trust_function_creators
+        if: steps.state.outputs.is_bootstrapped == 'true'
+        run: mysql -h 127.0.0.1 -P 3306 -u root -proot_ci_password -e "SET GLOBAL log_bin_trust_function_creators = 1; GRANT ALL PRIVILEGES ON *.* TO 'usayd'@'%'; FLUSH PRIVILEGES;"
+
       - name: Execute migrations on real MySQL 8.4 service
         if: steps.state.outputs.is_bootstrapped == 'true'
         run: php artisan migrate:fresh --no-interaction --force
