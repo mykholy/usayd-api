@@ -16,3 +16,7 @@ yarn-error.log
 *.sln.docstates
 .DS_Store
 Thumbs.db
+__pycache__/
+*.py[cod]
+review_output.json
+test_review_out.json
