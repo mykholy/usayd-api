@@ -5,7 +5,6 @@ namespace Tests\Feature\Auth;
 use App\Models\AuditEvent;
 use App\Models\User;
 use App\Services\Auth\TokenService;
-use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\PersonalAccessToken;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
@@ -18,9 +17,7 @@ class ConcurrentTokenRefreshTest extends TestCase
     {
         if ($this->userId) {
             PersonalAccessToken::where('tokenable_id', $this->userId)->delete();
-            DB::statement('SET @allow_audit_modification = 1;');
             AuditEvent::where('subject_type', 'user')->where('subject_id', (string) $this->userId)->delete();
-            DB::statement('SET @allow_audit_modification = 0;');
             User::where('id', $this->userId)->delete();
         }
 

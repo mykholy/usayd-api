@@ -27,10 +27,15 @@ Privileged actions (such as administrative overrides, status corrections, and pe
 - Enforced by `RequireReasonMetadata` middleware.
 - Missing reasons trigger RFC 7807 `403 FORBIDDEN` problem details.
 
-### 3. Append-Only Immutable Audit Trail (`audit_events`)
+### 3. Append-Only Audit Trail Scaffolding (`audit_events`) & Boundary Limitations
 - Managed by `AuditLogger::log()`.
 - Captures: `trace_id`, `actor_id`, `actor_type`, `subject_type`, `subject_id`, `action`, `purpose`, `ip_hash`, and structured `metadata`.
-- Multi-layer immutability controls:
-  1. **Application-Layer Protection:** Eloquent model lifecycle hooks (`static::updating()` and `static::deleting()`) raise `RuntimeException`, failing fast on individual model modification attempts. No `updated_at` column is defined (`const UPDATED_AT = null`).
-  2. **Database Engine-Layer Protection:** MySQL 8.4 LTS InnoDB `BEFORE UPDATE` and `BEFORE DELETE` triggers (`audit_events_prevent_update`, `audit_events_prevent_delete`) raise `SQLSTATE '45000'`, aborting all DML statements—including query-builder mass updates/deletes and raw SQL execution.
-  3. **Operational Environment Security:** MySQL triggers guard against application and operational DML mutations. In production environments, database connection roles should be restricted to `SELECT` and `INSERT` grants on the `audit_events` table to prevent administrative DDL overrides (`DROP TABLE`, `TRUNCATE TABLE`). Strict physical immutability is guaranteed when combining engine triggers with least-privilege database user permissions.
+- **Application-Layer Protection:**
+  - `static::updating()` throws `RuntimeException` (prohibits Eloquent updates).
+  - `static::deleting()` throws `RuntimeException` (prohibits Eloquent deletions).
+  - No `updated_at` column (`const UPDATED_AT = null`).
+- **Critical Architectural & Database Limitations:**
+  - Eloquent model lifecycle hooks intercept individual Eloquent model mutations only. They **do not** intercept mass query-builder calls (`DB::table('audit_events')->update(...)` or `->delete()`) or raw SQL (`UPDATE audit_events ...`).
+  - Therefore, application code alone **cannot and does not claim strict physical immutability**.
+  - True physical immutability requires infrastructure-level controls: provisioning production database connection credentials with least-privilege grants (`GRANT SELECT, INSERT ON audit_events` while strictly revoking `UPDATE`, `DELETE`, `DROP`, and `ALTER`).
+  - Automated test suites verify both application-level enforcement and documented query-builder / SQL boundary limits.

@@ -25,22 +25,18 @@ class AuditEvent extends Model
     use HasFactory;
 
     /**
-     * Audit log is strictly append-only. No updated_at column.
+     * Audit log is append-only at the application layer. No updated_at column.
      */
     public const UPDATED_AT = null;
 
     protected static function booted(): void
     {
-        static::updating(function (AuditEvent $event) {
-            if (! in_array($event->subject_type, ['concurrency_counter', 'account_balance', 'test_mutation'], true)) {
-                throw new RuntimeException('AuditEvent records are strictly immutable and append-only. Updates are prohibited.');
-            }
+        static::updating(function () {
+            throw new RuntimeException('AuditEvent Eloquent records are append-only. Updates via Eloquent are prohibited.');
         });
 
-        static::deleting(function (AuditEvent $event) {
-            if (! in_array($event->subject_type, ['concurrency_counter', 'account_balance', 'test_mutation'], true)) {
-                throw new RuntimeException('AuditEvent records are strictly immutable and append-only. Deletions are prohibited.');
-            }
+        static::deleting(function () {
+            throw new RuntimeException('AuditEvent Eloquent records are append-only. Deletions via Eloquent are prohibited.');
         });
     }
 
