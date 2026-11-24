@@ -103,6 +103,10 @@ jobs:
         if: steps.state.outputs.is_bootstrapped == 'true'
         run: python scripts/verify_concurrency_harness.py
 
+      - name: Verify Redis queues & failed-job lifecycle
+        if: steps.state.outputs.is_bootstrapped == 'true'
+        run: python scripts/verify_queue_lifecycle.py
+
       - name: Execute Pest / PHPUnit test suite
         if: steps.state.outputs.is_bootstrapped == 'true'
         run: php artisan test
