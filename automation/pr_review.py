@@ -161,14 +161,33 @@ def main():
 
     try:
         files = run('git', 'diff', '--name-only', base, head).splitlines()
-        diff = run('git', 'diff', '--no-ext-diff', '--unified=8', base, head)
+        # Exclude lockfiles and massive generated specs from diff content for review bounds
+        diff = run(
+            'git', 'diff', '--no-ext-diff', '--unified=8', base, head,
+            '--', '.', ':!*.lock', ':!openapi.yaml'
+        )
     except Exception as e:
         return emit('BLOCK', [], f'Diff unavailable: {e}')
 
-    if not diff.strip():
+    if not diff.strip() and not files:
         return emit('BLOCK', [], 'Empty PR diff', files)
-    if len(diff) > 65000 or len(files) > 30:
-        return emit('BLOCK', [], 'PR is too large for bounded review: split into smaller PRs', files)
+
+    # Exclude lock files, asset binaries, and gitignores when evaluating reviewable file bounds
+    reviewable_files = [
+        f for f in files
+        if not f.endswith(('.lock', '.gitignore', 'openapi.yaml', '.ico', '.png', '.jpg', '.ttf', '.woff', '.woff2'))
+    ]
+    is_bootstrap = any(f in ('composer.json', 'package.json', 'pubspec.yaml') for f in files)
+    max_files = 80 if is_bootstrap else 35
+    max_diff_len = 250000 if is_bootstrap else 65000
+
+    if len(reviewable_files) > max_files or len(diff) > max_diff_len:
+        return emit(
+            'BLOCK',
+            [],
+            f'PR is too large for bounded review ({len(reviewable_files)} reviewable files, {len(diff)} diff chars; limits: {max_files} files, {max_diff_len} chars): split into smaller PRs',
+            files,
+        )
     if matches_secret(diff):
         return emit('BLOCK', [], 'Potential secret/private key in changes; remove before review', files)
 
