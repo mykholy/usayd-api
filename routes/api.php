@@ -1,6 +1,7 @@
 <?php
 
 use App\Exceptions\ApiException;
+use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\HealthController;
 use App\Http\Controllers\Api\V1\QueueMetricsController;
 use App\Models\AuditEvent;
@@ -18,6 +19,23 @@ use Illuminate\Support\Str;
 Route::prefix('v1')->group(function () {
     Route::get('/health', [HealthController::class, 'check'])->name('api.v1.health');
     Route::get('/queue/metrics', [QueueMetricsController::class, 'metrics'])->name('api.v1.queue.metrics');
+
+    // Authentication and Token Lifecycle
+    Route::prefix('auth')->group(function () {
+        Route::post('/register', [AuthController::class, 'register'])->name('api.v1.auth.register');
+        Route::post('/login', [AuthController::class, 'login'])->name('api.v1.auth.login');
+        Route::post('/refresh', [AuthController::class, 'refresh'])->name('api.v1.auth.refresh');
+
+        Route::middleware(['auth:sanctum', 'ability:access-api'])->group(function () {
+            Route::get('/me', [AuthController::class, 'me'])->name('api.v1.auth.me');
+            Route::post('/logout', [AuthController::class, 'logout'])->name('api.v1.auth.logout');
+        });
+    });
+
+    // Profile contract compliant with OpenAPI /api/v1/me
+    Route::middleware(['auth:sanctum', 'ability:access-api'])->group(function () {
+        Route::get('/me', [AuthController::class, 'me'])->name('api.v1.me');
+    });
 
     // Test harness endpoints restricted strictly to local and testing environments
     if (app()->environment('local', 'testing')) {
