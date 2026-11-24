@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\V1\Admin\FeatureFlagController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\HealthController;
 use App\Http\Controllers\Api\V1\QueueMetricsController;
+use App\Http\Controllers\Api\V1\StorageController;
 use App\Models\AuditEvent;
 use App\Models\LearningPlan;
 use App\Services\Audit\AuditLogger;
@@ -24,6 +25,9 @@ Route::prefix('v1')->group(function () {
     Route::get('/health', [HealthController::class, 'check'])->name('api.v1.health');
     Route::get('/queue/metrics', [QueueMetricsController::class, 'metrics'])->name('api.v1.queue.metrics');
 
+    // Public cryptographically verified signed download
+    Route::get('/storage/download', [StorageController::class, 'download'])->name('api.v1.storage.download');
+
     // Authentication and Token Lifecycle
     Route::prefix('auth')->group(function () {
         Route::post('/register', [AuthController::class, 'register'])->name('api.v1.auth.register');
@@ -39,6 +43,10 @@ Route::prefix('v1')->group(function () {
     // Profile contract compliant with OpenAPI /api/v1/me
     Route::middleware(['auth:sanctum', 'ability:access-api'])->group(function () {
         Route::get('/me', [AuthController::class, 'me'])->name('api.v1.me');
+
+        // Storage Privacy & Signed Links
+        Route::post('/storage/signed-url', [StorageController::class, 'generateSignedUrl'])
+            ->name('api.v1.storage.signed-url');
     });
 
     // Domain Resources: Learning Plans (RBAC x Scope x Ownership Matrix)
