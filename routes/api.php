@@ -5,7 +5,10 @@ use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\HealthController;
 use App\Http\Controllers\Api\V1\QueueMetricsController;
 use App\Models\AuditEvent;
+use App\Models\LearningPlan;
+use App\Services\Audit\AuditLogger;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 
@@ -35,6 +38,66 @@ Route::prefix('v1')->group(function () {
     // Profile contract compliant with OpenAPI /api/v1/me
     Route::middleware(['auth:sanctum', 'ability:access-api'])->group(function () {
         Route::get('/me', [AuthController::class, 'me'])->name('api.v1.me');
+    });
+
+    // Domain Resources: Learning Plans (RBAC x Scope x Ownership Matrix)
+    Route::middleware(['auth:sanctum', 'ability:access-api'])->prefix('learning-plans')->group(function () {
+        Route::get('/{learningPlan}', function (LearningPlan $learningPlan) {
+            if (! Gate::allows('view', $learningPlan)) {
+                throw ApiException::forbidden('Access to this learning plan is restricted by ownership/assignment policy.');
+            }
+
+            return response()->json(['data' => $learningPlan]);
+        })->name('api.v1.learning-plans.show');
+
+        Route::put('/{learningPlan}', function (Request $request, LearningPlan $learningPlan) {
+            if (! Gate::allows('update', $learningPlan)) {
+                throw ApiException::forbidden('You are not authorized to update this learning plan.');
+            }
+
+            $validated = $request->validate([
+                'title' => 'required|string|max:255',
+                'status' => 'required|string|in:active,completed,draft',
+            ]);
+
+            $learningPlan->update($validated);
+
+            AuditLogger::log(
+                action: 'learning_plan.updated',
+                subjectType: 'learning_plan',
+                subjectId: $learningPlan->id,
+                purpose: 'Regular plan modification',
+                metadata: ['new_status' => $validated['status']]
+            );
+
+            return response()->json(['data' => $learningPlan]);
+        })->name('api.v1.learning-plans.update');
+
+        Route::post('/{learningPlan}/override', function (Request $request, LearningPlan $learningPlan) {
+            if (! Gate::allows('override', $learningPlan)) {
+                throw ApiException::forbidden('Privileged override requires academic or administrator credentials.');
+            }
+
+            $purpose = (string) $request->attributes->get('audit_purpose');
+
+            $learningPlan->update(['status' => 'completed']);
+
+            $event = AuditLogger::log(
+                action: 'learning_plan.administrative_override',
+                subjectType: 'learning_plan',
+                subjectId: $learningPlan->id,
+                purpose: $purpose,
+                metadata: [
+                    'actor_role' => $request->user()?->role,
+                    'override_action' => 'force_complete',
+                ]
+            );
+
+            return response()->json([
+                'data' => $learningPlan,
+                'audit_event_id' => $event->id,
+            ]);
+        })->middleware(['role:academic,admin', 'require.reason'])->name('api.v1.learning-plans.override');
     });
 
     // Test harness endpoints restricted strictly to local and testing environments

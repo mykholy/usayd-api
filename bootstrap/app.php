@@ -2,6 +2,8 @@
 
 use App\Http\Middleware\AssignTraceId;
 use App\Http\Middleware\EnforceIdempotency;
+use App\Http\Middleware\EnsureRole;
+use App\Http\Middleware\RequireReasonMetadata;
 use App\Support\Http\ProblemDetailsResponse;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -27,6 +29,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'idempotent' => EnforceIdempotency::class,
             'ability' => CheckForAnyAbility::class,
             'abilities' => CheckAbilities::class,
+            'role' => EnsureRole::class,
+            'require.reason' => RequireReasonMetadata::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
