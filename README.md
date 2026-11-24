@@ -67,6 +67,9 @@ python scripts/verify_database_foundations.py
 
 # Verify concurrency control & idempotency harness
 python scripts/verify_concurrency_harness.py
+
+# Verify Redis queue partitions & failed-job lifecycle
+python scripts/verify_queue_lifecycle.py
 ```
 
 ---
@@ -92,5 +95,16 @@ Detailed in [`docs/architecture/CONCURRENCY_AND_IDEMPOTENCY.md`](docs/architectu
 - **Pessimistic Locking:** `SELECT FOR UPDATE` prevents lost updates and double-booking race conditions.
 - **Resilient Transactions:** `ResilientTransaction::run(...)` intercepts transient deadlocks (Error 1213) and retries with backoff.
 - **IETF Idempotency Middleware:** `EnforceIdempotency` caches mutating responses and returns `Idempotent-Replayed: true` or RFC 7807 problem details (409 Conflict, 422 Payload Mismatch).
+
+---
+
+## 7. Redis Queues, Horizon & Failed-Job Lifecycle
+Detailed in [`docs/architecture/QUEUE_AND_FAILED_JOB_LIFECYCLE.md`](docs/architecture/QUEUE_AND_FAILED_JOB_LIFECYCLE.md).
+- **Queue Partitions:** `high`, `default`, `notifications`, `reports` isolated via Redis.
+- **Transactional Dispatch:** `after_commit => true` prevents race conditions.
+- **Retry & Backoff:** `BaseQueueJob` implements exponential backoff `[5, 15, 60]` seconds with 3 max attempts.
+- **Dead-Letter Review:** Terminal failures emit audit events and store full traces in `failed_jobs`; inspectable and replayable via `php artisan usayd:queue-dead-letter`.
+- **Operational Metrics:** `GET /api/v1/queue/metrics` reports partition depths and failure rates.
+
 
 

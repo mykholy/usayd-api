@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\HealthController;
+use App\Http\Controllers\Api\V1\QueueMetricsController;
 use App\Models\AuditEvent;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -15,6 +16,7 @@ use Illuminate\Support\Str;
 
 Route::prefix('v1')->group(function () {
     Route::get('/health', [HealthController::class, 'check'])->name('api.v1.health');
+    Route::get('/queue/metrics', [QueueMetricsController::class, 'metrics'])->name('api.v1.queue.metrics');
 
     // Test harness endpoints restricted strictly to local and testing environments
     if (app()->environment('local', 'testing')) {
