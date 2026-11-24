@@ -2,7 +2,7 @@
 
 namespace Tests\Feature\Concurrency;
 
-use App\Models\AuditEvent;
+use App\Models\SettingsVersion;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
@@ -10,18 +10,18 @@ class ParallelProcessConcurrencyTest extends TestCase
 {
     protected function tearDown(): void
     {
-        AuditEvent::where('subject_type', 'concurrency_counter')->delete();
+        SettingsVersion::where('namespace', 'concurrency')->delete();
         parent::tearDown();
     }
 
     public function test_concurrent_parallel_worker_processes_increment_safely(): void
     {
-        $target = AuditEvent::create([
-            'subject_type' => 'concurrency_counter',
-            'subject_id' => 'counter-1',
-            'action' => 'initialize',
-            'purpose' => '0',
-            'metadata' => ['count' => 0],
+        $target = SettingsVersion::create([
+            'namespace' => 'concurrency',
+            'scope' => 'parallel_counter',
+            'settings' => ['count' => 0],
+            'checksum' => hash('sha256', '0'),
+            'status' => 'active',
         ]);
 
         $targetId = $target->id;
@@ -47,12 +47,12 @@ class ParallelProcessConcurrencyTest extends TestCase
             );
         }
 
-        $finalRecord = AuditEvent::findOrFail($targetId);
+        $finalRecord = SettingsVersion::findOrFail($targetId);
         $expectedCount = $numWorkers * $incrementsPerWorker;
 
         $this->assertSame(
             $expectedCount,
-            $finalRecord->metadata['count'],
+            $finalRecord->settings['count'],
             "Counter must equal exactly {$expectedCount} with zero lost updates under parallel concurrency."
         );
     }

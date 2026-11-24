@@ -6,6 +6,7 @@ use App\Jobs\DispatchOutboxNotificationJob;
 use App\Models\AuditEvent;
 use App\Models\OutboxMessage;
 use DateTimeInterface;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
@@ -16,6 +17,7 @@ class TransactionalOutboxService
     /**
      * Record an outbox event.
      * When invoked inside an active DB transaction, commits atomically with domain entity changes.
+     * Guaranteed database-enforced idempotency when idempotency_key is supplied.
      */
     public function record(
         string $eventType,
@@ -33,30 +35,38 @@ class TransactionalOutboxService
             $headers['created_at'] = now()->toIso8601String();
         }
 
-        // Deduplication check if idempotency_key is provided in headers
-        if (isset($headers['idempotency_key'])) {
-            $existing = OutboxMessage::query()
-                ->where('aggregate_type', $aggregateType)
-                ->where('aggregate_id', $aggregateId)
-                ->where('event_type', $eventType)
-                ->where('headers->idempotency_key', $headers['idempotency_key'])
-                ->first();
+        $idempotencyKey = $headers['idempotency_key'] ?? null;
 
+        // Check if an entry with this idempotency key already exists
+        if ($idempotencyKey !== null) {
+            $existing = OutboxMessage::where('idempotency_key', $idempotencyKey)->first();
             if ($existing) {
                 return $existing;
             }
         }
 
-        return OutboxMessage::create([
-            'event_type' => $eventType,
-            'aggregate_type' => $aggregateType,
-            'aggregate_id' => $aggregateId,
-            'payload' => $payload,
-            'headers' => $headers,
-            'status' => OutboxMessage::STATUS_PENDING,
-            'attempts' => 0,
-            'scheduled_at' => $scheduledAt,
-        ]);
+        try {
+            return OutboxMessage::create([
+                'event_type' => $eventType,
+                'aggregate_type' => $aggregateType,
+                'aggregate_id' => $aggregateId,
+                'idempotency_key' => $idempotencyKey,
+                'payload' => $payload,
+                'headers' => $headers,
+                'status' => OutboxMessage::STATUS_PENDING,
+                'attempts' => 0,
+                'scheduled_at' => $scheduledAt,
+            ]);
+        } catch (QueryException $e) {
+            // If concurrent insert raced with the same unique idempotency key, retrieve existing
+            if ($idempotencyKey !== null && str_contains($e->getMessage(), 'uniq_outbox_idempotency_key')) {
+                $existing = OutboxMessage::where('idempotency_key', $idempotencyKey)->first();
+                if ($existing) {
+                    return $existing;
+                }
+            }
+            throw $e;
+        }
     }
 
     /**
@@ -88,8 +98,43 @@ class TransactionalOutboxService
     }
 
     /**
-     * Poll and publish due pending outbox messages using MySQL 8.4 SKIP LOCKED concurrency control.
-     * Returns the number of successfully dispatched messages.
+     * Recover abandoned/zombie in-processing messages caused by crashed worker processes.
+     */
+    public function recoverAbandonedProcessing(int $staleSeconds = 300): int
+    {
+        $recoveredCount = 0;
+
+        DB::transaction(function () use ($staleSeconds, &$recoveredCount) {
+            $staleMessages = OutboxMessage::staleProcessing($staleSeconds)
+                ->lock('for update skip locked')
+                ->get();
+
+            foreach ($staleMessages as $message) {
+                $message->update([
+                    'status' => OutboxMessage::STATUS_PENDING,
+                    'locked_at' => null,
+                ]);
+                $recoveredCount++;
+            }
+        });
+
+        if ($recoveredCount > 0) {
+            AuditEvent::create([
+                'trace_id' => (string) Str::uuid(),
+                'subject_type' => 'outbox_worker',
+                'subject_id' => 'recovery_batch',
+                'action' => 'outbox_zombies_recovered',
+                'purpose' => "Recovered [{$recoveredCount}] abandoned outbox messages exceeding [{$staleSeconds}s] timeout",
+                'metadata' => ['recovered_count' => $recoveredCount],
+            ]);
+        }
+
+        return $recoveredCount;
+    }
+
+    /**
+     * Poll and publish due pending/retryable outbox messages using MySQL 8.4 SKIP LOCKED concurrency control.
+     * Returns the number of successfully published messages.
      */
     public function publishPending(
         int $limit = 50,
@@ -97,14 +142,14 @@ class TransactionalOutboxService
         int $maxAttempts = 3,
         ?callable $dispatcher = null
     ): int {
-        $dispatchedCount = 0;
+        $publishedCount = 0;
 
         DB::transaction(function () use (
             $limit,
             $targetQueue,
             $maxAttempts,
             $dispatcher,
-            &$dispatchedCount
+            &$publishedCount
         ) {
             // Concurrency-safe row locking with MySQL 8.4 InnoDB SKIP LOCKED
             $messages = OutboxMessage::query()
@@ -115,6 +160,8 @@ class TransactionalOutboxService
                 ->get();
 
             foreach ($messages as $message) {
+                $message->markProcessing();
+
                 try {
                     if ($dispatcher !== null) {
                         $dispatcher($message);
@@ -131,8 +178,21 @@ class TransactionalOutboxService
                         );
                     }
 
-                    $message->markDispatched();
-                    $dispatchedCount++;
+                    $message->markPublished();
+                    $publishedCount++;
+
+                    // Record publication audit event (distinguished from delivery)
+                    AuditEvent::create([
+                        'trace_id' => $message->headers['trace_id'] ?? (string) Str::uuid(),
+                        'subject_type' => 'outbox_publisher',
+                        'subject_id' => $message->id,
+                        'action' => 'outbox_message_published',
+                        'purpose' => "Outbox message published to queue [{$targetQueue}]",
+                        'metadata' => [
+                            'event_type' => $message->event_type,
+                            'target_queue' => $targetQueue,
+                        ],
+                    ]);
                 } catch (Throwable $e) {
                     $message->recordAttemptFailure($e->getMessage(), $maxAttempts);
 
@@ -148,7 +208,7 @@ class TransactionalOutboxService
                                 'aggregate_type' => $message->aggregate_type,
                                 'aggregate_id' => $message->aggregate_id,
                                 'attempts' => $message->attempts,
-                                'error' => $e->getMessage(),
+                                'error' => substr($e->getMessage(), 0, 500),
                             ],
                         ]);
                     }
@@ -156,7 +216,7 @@ class TransactionalOutboxService
             }
         });
 
-        return $dispatchedCount;
+        return $publishedCount;
     }
 
     /**

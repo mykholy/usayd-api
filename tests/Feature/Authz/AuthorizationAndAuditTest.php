@@ -6,6 +6,7 @@ use App\Models\AuditEvent;
 use App\Models\LearningPlan;
 use App\Models\User;
 use App\Services\Audit\AuditLogger;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
@@ -229,32 +230,62 @@ class AuthorizationAndAuditTest extends TestCase
         $this->assertEquals('test.immutable_record', $fresh->action);
     }
 
-    public function test_audit_event_query_builder_and_raw_sql_limitations_are_documented_and_verified(): void
+    public function test_audit_event_database_level_immutability_triggers_prevent_query_builder_and_raw_sql_modifications(): void
     {
         $event = AuditLogger::log(
-            action: 'test.limitation_check',
+            action: 'test.trigger_immutability_check',
             subjectType: 'account',
             subjectId: 1001,
             purpose: 'Original Purpose'
         );
 
-        // Documented Limitation Verification:
-        // Eloquent model lifecycle hooks intercept Eloquent calls only;
-        // Query builder and raw SQL bypass model hooks unless an infrastructure least-privilege DB role is used.
-        DB::table('audit_events')
-            ->where('id', $event->id)
-            ->update(['purpose' => 'QueryBuilderModified']);
+        // 1. Query builder UPDATE must be blocked by BEFORE UPDATE trigger
+        $qbUpdateBlocked = false;
+        try {
+            DB::table('audit_events')
+                ->where('id', $event->id)
+                ->update(['purpose' => 'QueryBuilderModified']);
+        } catch (QueryException $e) {
+            $qbUpdateBlocked = true;
+            $this->assertStringContainsString('immutable', $e->getMessage());
+        }
+        $this->assertTrue($qbUpdateBlocked, 'Database trigger must prevent query builder UPDATE on audit_events.');
 
-        $updatedRecord = DB::table('audit_events')->where('id', $event->id)->first();
-        $this->assertEquals(
-            'QueryBuilderModified',
-            $updatedRecord->purpose,
-            'Confirms documented limitation: query builder bypasses Eloquent lifecycle hooks, necessitating least-privilege DB user roles in production.'
-        );
+        // 2. Query builder DELETE must be blocked by BEFORE DELETE trigger
+        $qbDeleteBlocked = false;
+        try {
+            DB::table('audit_events')
+                ->where('id', $event->id)
+                ->delete();
+        } catch (QueryException $e) {
+            $qbDeleteBlocked = true;
+            $this->assertStringContainsString('immutable', $e->getMessage());
+        }
+        $this->assertTrue($qbDeleteBlocked, 'Database trigger must prevent query builder DELETE on audit_events.');
 
-        // Raw SQL bypasses Eloquent lifecycle hooks as well
-        DB::statement('UPDATE audit_events SET purpose = ? WHERE id = ?', ['RawSqlModified', $event->id]);
-        $rawUpdatedRecord = DB::table('audit_events')->where('id', $event->id)->first();
-        $this->assertEquals('RawSqlModified', $rawUpdatedRecord->purpose);
+        // 3. Raw SQL UPDATE must be blocked by BEFORE UPDATE trigger
+        $rawUpdateBlocked = false;
+        try {
+            DB::statement('UPDATE audit_events SET purpose = ? WHERE id = ?', ['RawSqlModified', $event->id]);
+        } catch (QueryException $e) {
+            $rawUpdateBlocked = true;
+            $this->assertStringContainsString('immutable', $e->getMessage());
+        }
+        $this->assertTrue($rawUpdateBlocked, 'Database trigger must prevent raw SQL UPDATE on audit_events.');
+
+        // 4. Raw SQL DELETE must be blocked by BEFORE DELETE trigger
+        $rawDeleteBlocked = false;
+        try {
+            DB::statement('DELETE FROM audit_events WHERE id = ?', [$event->id]);
+        } catch (QueryException $e) {
+            $rawDeleteBlocked = true;
+            $this->assertStringContainsString('immutable', $e->getMessage());
+        }
+        $this->assertTrue($rawDeleteBlocked, 'Database trigger must prevent raw SQL DELETE on audit_events.');
+
+        // Verify the record is completely unmodified
+        $persisted = DB::table('audit_events')->where('id', $event->id)->first();
+        $this->assertNotNull($persisted);
+        $this->assertEquals('Original Purpose', $persisted->purpose);
     }
 }
