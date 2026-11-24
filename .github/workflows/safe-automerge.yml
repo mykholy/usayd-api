@@ -1,27 +1,30 @@
-name: Safe Native Auto Merge
+name: Safe Native Auto Merge (Disabled)
+# Governance Guard:
+# Automatic unattended merging is STRICTLY DISABLED.
+# Reason: GitHub branch protection rules are not enforceable on personal private repositories
+# on the current account tier. Unattended auto-merges risk landing code without
+# required status checks or human review.
+# All PR merges must be verified and executed manually with passing CI and required approvals.
+
 on:
   pull_request_target:
     types: [labeled]
+
 permissions:
   contents: read
-  pull-requests: write
+  pull-requests: read
+
 jobs:
   arm-auto-merge:
-    if: github.event.label.name == 'safe-automerge' && github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event.label.name == 'safe-automerge'
     runs-on: ubuntu-latest
     steps:
-      - name: Validate conservative allowlist, never check out PR code
-        id: risk
+      - name: Reject automated merge attempt
         uses: actions/github-script@v7
         with:
           script: |
-            const pr = context.payload.pull_request;
-            const files = await github.paginate(github.rest.pulls.listFiles,{owner:context.repo.owner,repo:context.repo.repo,pull_number:pr.number,per_page:100});
-            const excluded = /(^|\/)(auth|guardian|consent|minor|payments?|billing|payroll|recording|quran|safeguard|secrets|migrations|infra|ops)(\/|\.|$)|(^|\/)\.github\/|^(package\.json|pnpm-lock\.yaml|composer\.json|composer\.lock|pubspec\.(yaml|lock))$/i;
-            const lowRisk = files.length > 0 && files.length <= 12 && files.every(f => !excluded.test(f.filename)) && pr.additions <= 300 && pr.deletions <= 100;
-            if (!lowRisk) core.setFailed('Not eligible for unattended auto-merge; obtain human review');
-      - name: Enable native GitHub auto-merge after required checks
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: gh pr merge --auto --squash '${{ github.event.pull_request.number }}'
+            core.setFailed(
+              'Unattended auto-merge is DISABLED per Usayd governance policy. ' +
+              'Equivalent branch protection is not available on this private repository plan. ' +
+              'Every PR must pass verified CI checks and obtain explicit authorized review before manual merge.'
+            );
