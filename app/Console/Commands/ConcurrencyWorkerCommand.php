@@ -12,14 +12,14 @@ class ConcurrencyWorkerCommand extends Command
      *
      * @var string
      */
-    protected $signature = 'usayd:concurrency-worker {--id= : Target audit event ID} {--increments=1 : Number of atomic increments}';
+    protected $signature = 'usayd:concurrency-worker {--id= : Target settings version ID} {--increments=1 : Number of atomic increments}';
 
     /**
      * The console command description.
      *
      * @var string
      */
-    protected $description = 'Worker process for concurrent row-locking and atomic increments';
+    protected $description = 'Worker process for concurrent row-locking and atomic increments on mutable configuration tables';
 
     /**
      * Execute the console command.
@@ -37,20 +37,21 @@ class ConcurrencyWorkerCommand extends Command
 
         for ($i = 0; $i < $increments; $i++) {
             DB::transaction(function () use ($targetId) {
-                $row = DB::table('audit_events')
+                $row = DB::table('settings_versions')
                     ->where('id', $targetId)
                     ->lockForUpdate()
                     ->first();
 
                 if ($row) {
-                    $meta = json_decode($row->metadata, true) ?: ['count' => 0];
-                    $count = ((int) ($meta['count'] ?? 0)) + 1;
+                    $settings = json_decode($row->settings, true) ?: ['count' => 0];
+                    $count = ((int) ($settings['count'] ?? 0)) + 1;
 
-                    DB::table('audit_events')
+                    DB::table('settings_versions')
                         ->where('id', $targetId)
                         ->update([
-                            'purpose' => (string) $count,
-                            'metadata' => json_encode(['count' => $count]),
+                            'settings' => json_encode(['count' => $count]),
+                            'checksum' => hash('sha256', (string) $count),
+                            'updated_at' => now(),
                         ]);
                 }
             });

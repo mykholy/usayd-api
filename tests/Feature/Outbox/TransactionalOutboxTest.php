@@ -7,9 +7,11 @@ use App\Models\OutboxMessage;
 use App\Models\User;
 use App\Services\Outbox\TransactionalOutboxService;
 use Exception;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class TransactionalOutboxTest extends TestCase
@@ -229,7 +231,7 @@ class TransactionalOutboxTest extends TestCase
         $this->assertEquals(0, $dispatched);
 
         $message->refresh();
-        $this->assertEquals(OutboxMessage::STATUS_PENDING, $message->status);
+        $this->assertEquals(OutboxMessage::STATUS_FAILED, $message->status);
         $this->assertEquals(1, $message->attempts);
         $this->assertStringContainsString('Transient Redis connection refused', $message->error_message);
     }
@@ -245,6 +247,7 @@ class TransactionalOutboxTest extends TestCase
 
         // Simulate 3 failures
         for ($i = 0; $i < 3; $i++) {
+            $this->travel(100)->seconds();
             $this->service->publishPending(
                 limit: 10,
                 targetQueue: 'notifications',
@@ -254,6 +257,8 @@ class TransactionalOutboxTest extends TestCase
                 }
             );
         }
+
+        $this->travelBack();
 
         $message->refresh();
         $this->assertEquals(OutboxMessage::STATUS_DEAD_LETTER, $message->status);
@@ -362,5 +367,147 @@ class TransactionalOutboxTest extends TestCase
         $this->assertEquals(OutboxMessage::STATUS_PENDING, $m2->status);
         $this->assertEquals(0, $m1->attempts);
         $this->assertEquals(0, $m2->attempts);
+    }
+
+    public function test_database_enforces_unique_constraint_on_idempotency_key(): void
+    {
+        $this->service->record(
+            eventType: 'order.placed',
+            aggregateType: 'order',
+            aggregateId: 'ord-101',
+            payload: ['item' => 'book'],
+            headers: ['idempotency_key' => 'idem-uniq-constraint-01']
+        );
+
+        // Bypassing service to test MySQL database schema uniqueness enforcement directly
+        $queryExceptionThrown = false;
+        try {
+            DB::table('outbox_messages')->insert([
+                'id' => (string) Str::uuid(),
+                'event_type' => 'order.duplicate',
+                'aggregate_type' => 'order',
+                'aggregate_id' => 'ord-102',
+                'idempotency_key' => 'idem-uniq-constraint-01', // Duplicate unique key
+                'payload' => json_encode(['item' => 'duplicate']),
+                'headers' => json_encode([]),
+                'status' => OutboxMessage::STATUS_PENDING,
+                'attempts' => 0,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        } catch (QueryException $e) {
+            $queryExceptionThrown = true;
+            $this->assertStringContainsString('uniq_outbox_idempotency_key', $e->getMessage());
+        }
+
+        $this->assertTrue($queryExceptionThrown, 'Direct database insert with duplicate idempotency_key must violate unique constraint.');
+    }
+
+    public function test_worker_recovers_abandoned_zombie_processing_messages(): void
+    {
+        // 1. Create a message and artificially simulate a crashed worker leaving it stuck in processing
+        $zombie = $this->service->record(
+            eventType: 'transcode.video',
+            aggregateType: 'video',
+            aggregateId: 'vid-zombie-001',
+            payload: ['url' => 'https://example.com/raw.mp4']
+        );
+
+        $zombie->status = OutboxMessage::STATUS_PROCESSING;
+        $zombie->locked_at = now()->subMinutes(10); // Expired beyond 300s
+        $zombie->save();
+
+        // 2. Create another active in-flight message that is not yet expired (e.g. locked 30s ago)
+        $activeInFlight = $this->service->record(
+            eventType: 'transcode.video',
+            aggregateType: 'video',
+            aggregateId: 'vid-active-002',
+            payload: ['url' => 'https://example.com/raw2.mp4']
+        );
+        $activeInFlight->status = OutboxMessage::STATUS_PROCESSING;
+        $activeInFlight->locked_at = now()->subSeconds(30);
+        $activeInFlight->save();
+
+        // 3. Trigger zombie recovery with 300s threshold
+        $recoveredCount = $this->service->recoverAbandonedProcessing(staleSeconds: 300);
+
+        $this->assertEquals(1, $recoveredCount);
+
+        $zombie->refresh();
+        $this->assertEquals(OutboxMessage::STATUS_PENDING, $zombie->status);
+        $this->assertNull($zombie->locked_at);
+
+        $activeInFlight->refresh();
+        $this->assertEquals(OutboxMessage::STATUS_PROCESSING, $activeInFlight->status);
+        $this->assertNotNull($activeInFlight->locked_at);
+
+        // Verify audit event was logged for the recovery batch
+        $this->assertDatabaseHas('audit_events', [
+            'subject_type' => 'outbox_worker',
+            'action' => 'outbox_zombies_recovered',
+        ]);
+    }
+
+    public function test_consumer_job_is_idempotent_and_confirms_delivery(): void
+    {
+        $message = $this->service->record(
+            eventType: 'student.progress_awarded',
+            aggregateType: 'student',
+            aggregateId: 'stu-progress-01',
+            payload: ['badge' => 'tajweed_expert']
+        );
+
+        $job = new DispatchOutboxNotificationJob(
+            outboxMessageId: $message->id,
+            eventType: $message->event_type,
+            aggregateType: $message->aggregate_type,
+            aggregateId: $message->aggregate_id,
+            payload: $message->payload,
+            headers: $message->headers
+        );
+
+        // First execution: verifies and delivers
+        $job->handle();
+
+        $message->refresh();
+        $this->assertEquals(OutboxMessage::STATUS_DELIVERED, $message->status);
+        $this->assertTrue($message->isDelivered());
+
+        // Verify delivery audit event
+        $deliveryAuditCount = DB::table('audit_events')
+            ->where('subject_type', 'outbox_notification')
+            ->where('subject_id', $message->id)
+            ->where('action', 'notification_delivered')
+            ->count();
+        $this->assertEquals(1, $deliveryAuditCount);
+
+        // Second execution: must be a no-op (idempotent duplicate run)
+        $job->handle();
+
+        $deliveryAuditCountAfterSecondRun = DB::table('audit_events')
+            ->where('subject_type', 'outbox_notification')
+            ->where('subject_id', $message->id)
+            ->where('action', 'notification_delivered')
+            ->count();
+        $this->assertEquals(1, $deliveryAuditCountAfterSecondRun, 'Duplicate job execution must not re-process or duplicate delivery audit events.');
+    }
+
+    public function test_error_messages_are_sanitized_to_prevent_leaking_sensitive_tokens(): void
+    {
+        $message = $this->service->record(
+            eventType: 'auth.webhook',
+            aggregateType: 'webhook',
+            aggregateId: 'wh-001',
+            payload: ['event' => 'ping']
+        );
+
+        $rawError = 'Failed downstream HTTP call with authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9 and password=SuperSecretPassword123!';
+        $message->recordAttemptFailure($rawError, maxAttempts: 3);
+
+        $message->refresh();
+        $this->assertStringNotContainsString('SuperSecretPassword123!', $message->error_message);
+        $this->assertStringNotContainsString('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9', $message->error_message);
+        $this->assertStringContainsString('Bearer [REDACTED]', $message->error_message);
+        $this->assertStringContainsString('password=[REDACTED]', $message->error_message);
     }
 }

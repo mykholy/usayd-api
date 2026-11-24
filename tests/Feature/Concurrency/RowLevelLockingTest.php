@@ -2,7 +2,7 @@
 
 namespace Tests\Feature\Concurrency;
 
-use App\Models\AuditEvent;
+use App\Models\SettingsVersion;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
@@ -13,52 +13,54 @@ class RowLevelLockingTest extends TestCase
 
     public function test_pessimistic_row_level_locking_prevents_lost_updates(): void
     {
-        // Setup initial balance record
-        $record = AuditEvent::create([
-            'subject_type' => 'account_balance',
-            'subject_id' => 'acc-001',
-            'action' => 'initial_credit',
-            'purpose' => '1000',
-            'metadata' => ['balance' => 1000],
+        // Setup initial balance record on mutable table
+        $record = SettingsVersion::create([
+            'namespace' => 'billing',
+            'scope' => 'account_balance',
+            'settings' => ['balance' => 1000],
+            'checksum' => hash('sha256', '1000'),
+            'status' => 'active',
         ]);
 
         // Transaction 1: Reads with lock, updates balance
         DB::transaction(function () use ($record) {
-            $locked = DB::table('audit_events')
+            $locked = DB::table('settings_versions')
                 ->where('id', $record->id)
                 ->lockForUpdate()
                 ->first();
 
-            $currentBalance = json_decode($locked->metadata, true)['balance'];
+            $currentBalance = json_decode($locked->settings, true)['balance'];
             $newBalance = $currentBalance - 300;
 
-            DB::table('audit_events')
+            DB::table('settings_versions')
                 ->where('id', $record->id)
                 ->update([
-                    'purpose' => (string) $newBalance,
-                    'metadata' => json_encode(['balance' => $newBalance]),
+                    'settings' => json_encode(['balance' => $newBalance]),
+                    'checksum' => hash('sha256', (string) $newBalance),
+                    'updated_at' => now(),
                 ]);
         });
 
         // Transaction 2: Reads locked updated state, updates balance again
         DB::transaction(function () use ($record) {
-            $locked = DB::table('audit_events')
+            $locked = DB::table('settings_versions')
                 ->where('id', $record->id)
                 ->lockForUpdate()
                 ->first();
 
-            $currentBalance = json_decode($locked->metadata, true)['balance'];
+            $currentBalance = json_decode($locked->settings, true)['balance'];
             $newBalance = $currentBalance - 200;
 
-            DB::table('audit_events')
+            DB::table('settings_versions')
                 ->where('id', $record->id)
                 ->update([
-                    'purpose' => (string) $newBalance,
-                    'metadata' => json_encode(['balance' => $newBalance]),
+                    'settings' => json_encode(['balance' => $newBalance]),
+                    'checksum' => hash('sha256', (string) $newBalance),
+                    'updated_at' => now(),
                 ]);
         });
 
-        $finalRecord = AuditEvent::findOrFail($record->id);
-        $this->assertSame(500, $finalRecord->metadata['balance'], 'Final balance must be exactly 1000 - 300 - 200 = 500.');
+        $finalRecord = SettingsVersion::findOrFail($record->id);
+        $this->assertSame(500, $finalRecord->settings['balance'], 'Final balance must be exactly 1000 - 300 - 200 = 500.');
     }
 }
