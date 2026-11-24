@@ -1,6 +1,8 @@
 <?php
 
+use App\Http\Middleware\AssignTraceId;
 use App\Http\Middleware\EnforceIdempotency;
+use App\Support\Http\ProblemDetailsResponse;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -14,6 +16,7 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->append(AssignTraceId::class);
         $middleware->alias([
             'idempotent' => EnforceIdempotency::class,
         ]);
@@ -22,4 +25,10 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
+
+        $exceptions->render(function (Throwable $e, Request $request) {
+            if ($request->is('api/*') || $request->expectsJson()) {
+                return ProblemDetailsResponse::fromThrowable($e, $request);
+            }
+        });
     })->create();
