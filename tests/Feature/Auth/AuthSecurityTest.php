@@ -3,6 +3,7 @@
 namespace Tests\Feature\Auth;
 
 use App\Models\User;
+use App\Modules\Identity\Application\Ports\TokenManager;
 use App\Services\Auth\TokenService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
@@ -387,6 +388,61 @@ class AuthSecurityTest extends TestCase
         $this->postJson('/api/v1/auth/refresh', [
             'refresh_token' => $tokens['refresh_token'],
         ], ['Accept-Language' => 'en'])->assertStatus(401);
+    }
+
+    public function test_same_device_names_have_independent_token_families(): void
+    {
+        $user = User::factory()->create();
+        $service = app(TokenService::class);
+        $first = $service->issueTokens($user, 'mobile');
+        $second = $service->issueTokens($user, 'mobile');
+
+        $rotated = $service->rotateRefreshToken($first['refresh_token']);
+
+        $this->assertNull(PersonalAccessToken::findToken($first['access_token']));
+        $this->assertNotNull(PersonalAccessToken::findToken($second['access_token']));
+        $this->assertNotNull(PersonalAccessToken::findToken($second['refresh_token']));
+        $service->revokeDeviceToken($user, PersonalAccessToken::findToken($rotated['access_token']));
+        $this->assertNull(PersonalAccessToken::findToken($rotated['refresh_token']));
+        $this->assertNotNull(PersonalAccessToken::findToken($second['refresh_token']));
+    }
+
+    public function test_expired_refresh_token_cleanup_is_committed(): void
+    {
+        $user = User::factory()->create();
+        $tokens = app(TokenService::class)->issueTokens($user);
+        PersonalAccessToken::findToken($tokens['refresh_token'])->update(['expires_at' => now()->subMinute()]);
+
+        $this->postJson('/api/v1/auth/refresh', ['refresh_token' => $tokens['refresh_token']])
+            ->assertStatus(401);
+
+        $this->assertNull(PersonalAccessToken::findToken($tokens['refresh_token']));
+    }
+
+    public function test_suspended_user_cannot_use_previously_issued_access_token(): void
+    {
+        $user = User::factory()->create();
+        $tokens = app(TokenService::class)->issueTokens($user);
+        $user->update(['status' => 'suspended']);
+
+        $this->withToken($tokens['access_token'])->getJson('/api/v1/me')
+            ->assertStatus(401);
+    }
+
+    public function test_mobile_registration_rolls_back_when_token_issuance_fails(): void
+    {
+        $this->mock(TokenManager::class, function ($mock): void {
+            $mock->shouldReceive('issue')->once()->andThrow(new \RuntimeException('Simulated token persistence failure'));
+        });
+
+        $this->postJson('/api/v1/auth/register', [
+            'name' => 'Rollback Test',
+            'email' => 'rollback@example.test',
+            'password' => 'ExamplePassword123',
+        ])->assertStatus(500);
+
+        $this->assertDatabaseMissing('users', ['email' => 'rollback@example.test']);
+        $this->assertDatabaseMissing('audit_events', ['action' => 'auth.register.success']);
     }
 
     public function test_csrf_cookie_endpoint_is_accessible(): void

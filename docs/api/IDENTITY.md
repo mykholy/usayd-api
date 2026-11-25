@@ -17,3 +17,5 @@ Mobile: response data has access_token, refresh_token, expires_in, token_type. A
 العربية: استخدم الترويسة Accept-Language: ar. تسجيل الدخول وإعادة إصدار الرموز متاحان للحسابات النشطة فقط. يجب حفظ الرموز بشكل آمن وعدم تسجيلها في السجلات.
 
 The original OpenAPI is a future contract draft; the currently implemented email-based scaffold is documented separately. Do not treat draft contact/age-band registration as implemented.
+
+Token lifecycle: each issuance has a server-generated independent family ID even when device labels coincide. Existing device-name-only token pairs remain accepted and are migrated on refresh; existing indistinguishable legacy pairs are revoked as one family. Expired refresh tokens are removed on rejection. Previously issued access tokens for inactive accounts are rejected on protected API routes. Mobile account creation, audit and token issuance are atomic. Web session establishment occurs after the database transaction commits.

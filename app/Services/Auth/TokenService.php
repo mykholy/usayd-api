@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Services\Auth;
 
 use App\Exceptions\ApiException;
@@ -7,6 +9,7 @@ use App\Models\AuditEvent;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Laravel\Sanctum\PersonalAccessToken;
 
 class TokenService
@@ -15,157 +18,153 @@ class TokenService
 
     public const REFRESH_TOKEN_EXPIRATION_DAYS = 30;
 
-    /**
-     * Issue an access token and refresh token pair for a user.
-     *
-     * @return array{access_token: string, expires_in: int, refresh_token: string, token_type: string}
-     */
+    /** @return array{access_token: string, expires_in: int, refresh_token: string, token_type: string} */
     public function issueTokens(User $user, ?string $deviceName = 'mobile-device'): array
     {
-        if (($user->status ?? $user->fresh()?->status) !== 'active') {
-            throw ApiException::unauthorized(__('identity.invalid_credentials'));
-        }
+        return DB::transaction(function () use ($user, $deviceName): array {
+            $account = User::query()->lockForUpdate()->findOrFail($user->getKey());
+            if ($account->status !== 'active') {
+                throw ApiException::unauthorized(__('identity.invalid_credentials'));
+            }
 
-        $sanitizedDevice = preg_replace('/[^a-zA-Z0-9_\-\.]/', '-', (string) $deviceName) ?: 'device';
+            $device = preg_replace('/[^a-zA-Z0-9_\-\.]/', '-', (string) $deviceName) ?: 'device';
 
-        // Issue access token (expires in 60 minutes)
-        $accessExpiresAt = now()->addMinutes(self::ACCESS_TOKEN_EXPIRATION_MINUTES);
-        $accessToken = $user->createToken(
-            "{$sanitizedDevice}:access",
-            ['access-api'],
-            $accessExpiresAt
-        );
+            return $this->issuePair($account, $device.':'.Str::uuid());
+        });
+    }
 
-        // Issue refresh token (expires in 30 days)
-        $refreshExpiresAt = now()->addDays(self::REFRESH_TOKEN_EXPIRATION_DAYS);
-        $refreshToken = $user->createToken(
-            "{$sanitizedDevice}:refresh",
-            ['issue-token'],
-            $refreshExpiresAt
-        );
+    /** @return array{access_token: string, expires_in: int, refresh_token: string, token_type: string} */
+    private function issuePair(User $user, string $family): array
+    {
+        $access = $user->createToken($family.':access', ['access-api'], now()->addMinutes(self::ACCESS_TOKEN_EXPIRATION_MINUTES));
+        $refresh = $user->createToken($family.':refresh', ['issue-token'], now()->addDays(self::REFRESH_TOKEN_EXPIRATION_DAYS));
 
         return [
-            'access_token' => $accessToken->plainTextToken,
+            'access_token' => $access->plainTextToken,
             'expires_in' => self::ACCESS_TOKEN_EXPIRATION_MINUTES * 60,
-            'refresh_token' => $refreshToken->plainTextToken,
+            'refresh_token' => $refresh->plainTextToken,
             'token_type' => 'Bearer',
         ];
     }
 
-    /**
-     * Rotate a refresh token: atomically locks and revokes the old refresh token inside a database transaction
-     * and issues a new replacement pair.
-     *
-     * @return array{access_token: string, expires_in: int, refresh_token: string, token_type: string}
-     *
-     * @throws ApiException
-     */
-    public function rotateRefreshToken(string $plainRefreshToken, ?string $deviceName = 'mobile-device'): array
+    /** @return array{access_token: string, expires_in: int, refresh_token: string, token_type: string} */
+    public function rotateRefreshToken(#[\SensitiveParameter] string $plainRefreshToken, ?string $deviceName = 'mobile-device'): array
     {
-        return DB::transaction(function () use ($plainRefreshToken, $deviceName) {
-            $token = null;
+        // Resolve identity first, then acquire locks in account -> token order.
+        $candidate = PersonalAccessToken::findToken($plainRefreshToken);
+        if (! $candidate || $candidate->tokenable_type !== (new User)->getMorphClass()) {
+            throw ApiException::unauthorized(__('identity.invalid_refresh'));
+        }
 
-            if (str_contains($plainRefreshToken, '|')) {
-                [$id, $plain] = explode('|', $plainRefreshToken, 2);
-                /** @var PersonalAccessToken|null $record */
-                $record = PersonalAccessToken::where('id', $id)->lockForUpdate()->first();
-                if ($record && hash_equals($record->token, hash('sha256', $plain))) {
-                    $token = $record;
-                }
-            } else {
-                $token = PersonalAccessToken::where('token', hash('sha256', $plainRefreshToken))->lockForUpdate()->first();
-            }
+        $result = DB::transaction(function () use ($candidate, $plainRefreshToken, $deviceName): array|ApiException {
+            $user = User::query()->lockForUpdate()->find($candidate->tokenable_id);
+            $token = PersonalAccessToken::query()->lockForUpdate()->find($candidate->getKey());
 
-            if (! $token) {
-                throw ApiException::unauthorized(__('identity.invalid_refresh'));
+            $plain = str_contains($plainRefreshToken, '|') ? explode('|', $plainRefreshToken, 2)[1] : $plainRefreshToken;
+            if (! $token || ! hash_equals($token->token, hash('sha256', $plain))) {
+                return ApiException::unauthorized(__('identity.invalid_refresh'));
             }
 
             if (! $token->can('issue-token')) {
-                throw ApiException::forbidden(__('identity.refresh_forbidden'));
+                return ApiException::forbidden(__('identity.refresh_forbidden'));
             }
 
             if ($token->expires_at && $token->expires_at->isPast()) {
                 $token->delete();
-                throw ApiException::unauthorized(__('identity.refresh_expired'));
+
+                return ApiException::unauthorized(__('identity.refresh_expired'));
             }
 
-            /** @var User|null $user */
-            $user = $token->tokenable;
-            if (! $user instanceof User || $user->status !== 'active') {
+            if (! $user || $user->status !== 'active') {
                 $token->delete();
-                throw ApiException::unauthorized(__('identity.invalid_refresh'));
+
+                return ApiException::unauthorized(__('identity.invalid_refresh'));
             }
 
-            $tokenName = (string) $token->name;
-            $devicePrefix = str_contains($tokenName, ':')
-                ? explode(':', $tokenName, 2)[0]
-                : (preg_replace('/[^a-zA-Z0-9_\-\.]/', '-', (string) $deviceName) ?: 'mobile');
+            $family = $this->familyName($token);
+            $this->deleteFamily($user, $token);
 
-            // Delete the consumed refresh token immediately inside the transaction lock
-            $token->delete();
+            // Legacy device-only names are promoted to unique family IDs on rotation.
+            if ($family === null || ! str_contains($family, ':')) {
+                $device = $family ?? (preg_replace('/[^a-zA-Z0-9_\-\.]/', '-', (string) $deviceName) ?: 'mobile');
+                $family = $device.':'.Str::uuid();
+            }
 
-            // Revoke any existing active access tokens for this device family
-            $user->tokens()->where('name', "{$devicePrefix}:access")->delete();
-
-            // Issue new token pair
-            $newTokens = $this->issueTokens($user, $devicePrefix);
+            $tokens = $this->issuePair($user, $family);
 
             AuditEvent::create([
                 'subject_type' => 'user',
                 'subject_id' => (string) $user->id,
                 'action' => 'auth.token.rotated',
                 'purpose' => 'Mobile token rotation contract execution',
-                'metadata' => [
-                    'device_name' => $devicePrefix,
-                ],
+                'metadata' => ['device_name' => explode(':', $family, 2)[0]],
             ]);
 
-            return $newTokens;
+            return $tokens;
         });
+
+        // Throw after commit so invalid or expired token cleanup is not rolled back.
+        if ($result instanceof ApiException) {
+            throw $result;
+        }
+
+        return $result;
     }
 
-    /**
-     * Revoke the current device token family (access token + refresh token) from the request.
-     */
     public function revokeCurrentDeviceTokens(Request $request): void
     {
         $user = $request->user();
-        if (! $user) {
-            return;
-        }
+        $token = $user?->currentAccessToken();
 
-        $token = $user->currentAccessToken();
-
-        if ($token instanceof PersonalAccessToken) {
+        if ($user instanceof User && $token instanceof PersonalAccessToken) {
             $this->revokeDeviceToken($user, $token);
         }
     }
 
     public function revokeDeviceToken(User $user, PersonalAccessToken $token): void
     {
-        $tokenName = (string) $token->name;
-
-        if (str_contains($tokenName, ':')) {
-            [$devicePrefix] = explode(':', $tokenName, 2);
-            $user->tokens()->whereIn('name', ["{$devicePrefix}:access", "{$devicePrefix}:refresh"])->delete();
-        } else {
-            $token->delete();
-        }
+        DB::transaction(function () use ($user, $token): void {
+            $account = User::query()->lockForUpdate()->findOrFail($user->getKey());
+            $record = $account->tokens()->find($token->getKey());
+            if ($record instanceof PersonalAccessToken) {
+                $this->deleteFamily($account, $record);
+            }
+        });
     }
 
-    /**
-     * Revoke the current access token from the request (backward-compatible alias).
-     */
+    private function familyName(PersonalAccessToken $token): ?string
+    {
+        $name = (string) $token->name;
+        foreach ([':access', ':refresh'] as $suffix) {
+            if (str_ends_with($name, $suffix)) {
+                return substr($name, 0, -strlen($suffix));
+            }
+        }
+
+        return null;
+    }
+
+    private function deleteFamily(User $user, PersonalAccessToken $token): void
+    {
+        $family = $this->familyName($token);
+        if ($family === null) {
+            $token->delete();
+
+            return;
+        }
+
+        $user->tokens()->whereIn('name', [$family.':access', $family.':refresh'])->delete();
+    }
+
     public function revokeCurrentToken(Request $request): void
     {
         $this->revokeCurrentDeviceTokens($request);
     }
 
-    /**
-     * Revoke all personal access tokens for the given user.
-     */
     public function revokeAllTokens(User $user): void
     {
-        $user->tokens()->delete();
+        DB::transaction(function () use ($user): void {
+            User::query()->lockForUpdate()->findOrFail($user->getKey())->tokens()->delete();
+        });
     }
 }
