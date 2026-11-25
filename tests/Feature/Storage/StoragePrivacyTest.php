@@ -240,6 +240,7 @@ class StoragePrivacyTest extends TestCase
         $this->assertStringContainsString('application/problem+json', (string) $response->headers->get('Content-Type'));
         $this->assertStringContainsString('not found', (string) $response->json('detail'));
     }
+
     public function test_claimed_owner_cannot_be_used_to_sign_another_learners_path(): void
     {
         $actor = User::factory()->create(['role' => 'learner']);

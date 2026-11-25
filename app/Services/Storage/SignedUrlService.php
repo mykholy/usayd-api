@@ -10,13 +10,13 @@ use Illuminate\Support\Str;
 
 class SignedUrlService
 {
-    public function __construct(private readonly OwnedStoragePath $ownedPath) {}
-
     public const MIN_EXPIRATION_SECONDS = 60; // 1 minute
 
     public const MAX_EXPIRATION_SECONDS = 3600; // 1 hour
 
     public const DEFAULT_EXPIRATION_SECONDS = 900; // 15 minutes
+
+    public function __construct(private readonly OwnedStoragePath $ownedPath) {}
 
     /**
      * Generate a cryptographic HMAC-SHA256 signed URL for accessing a private storage asset.
