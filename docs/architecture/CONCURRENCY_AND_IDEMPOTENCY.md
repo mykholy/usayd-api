@@ -34,17 +34,17 @@ Usayd Academy enforces the following concurrency standards on **MySQL 8.4 LTS**:
 
 ## 2. API Idempotency Specification
 
-All mutating API endpoints (`POST`, `PUT`, `PATCH`, `DELETE`) in Usayd Academy support the IETF `Idempotency-Key` HTTP header.
+The database-only idempotency middleware supports mutating operations (`POST`, `PUT`, `PATCH`, `DELETE`). It is currently attached only to the test harness; production operations must opt in after confirming authorization, same-connection transaction boundaries, and replay-safe responses.
 
-### 2.1. Middleware Lifecycle (`EnforceIdempotency`)
-1. **Header Validation:** The client passes a unique `Idempotency-Key` (1–255 ASCII printable characters).
-2. **Payload Hashing:** The middleware generates a deterministic SHA256 digest: `hash('sha256', method + '|' + path + '|' + raw_payload)`.
-3. **Atomic Reservation (`in_flight`):** An atomic `SELECT ... FOR UPDATE` or insert is performed on `idempotency_keys`:
-   - **New Key:** A record is inserted with `status: 'in_flight'` and `expires_at: now() + 24 hours`. The request proceeds to the controller.
-   - **Duplicate Key (Completed):** The cached response (status code, headers, JSON body) is returned immediately with `Idempotent-Replayed: true`. The controller is not invoked.
-   - **Duplicate Key (In-Flight):** An RFC 7807 `409 Conflict` problem details response is returned: `"A request with this Idempotency-Key is currently being processed"`.
-   - **Key Reused with Mismatched Payload:** An RFC 7807 `422 Unprocessable Entity` is returned: `"This Idempotency-Key was previously used with a different request payload"`.
-4. **Completion:** On controller completion, the record transitions to `status: 'completed'` and caches the response. On uncaught exception, it transitions to `status: 'failed'` allowing client retry.
+### 2.1. Middleware lifecycle (atomic database mode)
+
+- Validate key (1–255 printable ASCII characters). Missing keys remain optional in the test harness; production financial mutations must require a key.
+- Hash principal, method, target path including query string, and raw body. Reused nonexpired keys with a different request receive 422.
+- The unique index and row lock serialize duplicates. Reservation, database mutation, successful JSON snapshot and completed status share one transaction; failures roll back the reservation and mutation. Concurrent duplicates wait for the transaction then replay the committed result; pre-existing ambiguous in-flight reservations receive 409 and require reconciliation, even after expiration.
+- Replay preserves the original response locale and sets Idempotent-Replayed. Only replay-safe JSON is accepted; sensitive keys and non-JSON responses fail closed and roll back. Never use this middleware for direct provider calls, authentication token responses, streaming or other irreversible external side effects; use a transactional outbox.
+- Existing legacy failed records may retry in the test harness. Reconcile them before enabling production routes. Completed keys expire after 24 hours under the existing policy. This is not a guarantee of exactly-once external delivery.
+
+العربية: يتم تنفيذ العملية المحلية وحفظ نتيجتها داخل معاملة واحدة. يعاد الرد الأصلي بنفس اللغة دون إعادة تنفيذ العملية. يجب استخدام Outbox لأي أثر خارجي وعدم تطبيق هذا المسار على ردود التوكنات.
 
 ---
 

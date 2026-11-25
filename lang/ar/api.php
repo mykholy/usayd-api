@@ -18,6 +18,7 @@ return [
     'feature_flag_missing' => 'إعداد الميزة المطلوب غير موجود.',
     'feature_flag_updated' => 'تم تحديث إعداد الميزة بنجاح.',
     'health_unavailable' => 'تعذر التحقق من جاهزية إحدى خدمات النظام الأساسية.',
+    'idempotency_response_unsafe' => 'لا يمكن حفظ نتيجة هذه العملية وإعادة إرسالها بأمان.',
     'idempotency_invalid_title' => 'مفتاح منع التكرار غير صالح',
     'idempotency_invalid_detail' => 'يجب أن يحتوي مفتاح منع التكرار على 1 إلى 255 محرف ASCII قابلا للطباعة دون مسافات.',
     'idempotency_mismatch_title' => 'تعارض بيانات الطلب المكرر',

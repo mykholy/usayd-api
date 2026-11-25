@@ -19,7 +19,9 @@ final class SetApiLocale
 
         try {
             $response = $next($request);
-            $response->headers->set('Content-Language', $locale);
+            if (! $response->headers->has('Content-Language')) {
+                $response->headers->set('Content-Language', $locale);
+            }
             $response->setVary('Accept-Language', false);
 
             return $response;

@@ -2,9 +2,12 @@
 
 namespace Tests\Feature\Concurrency;
 
+use App\Exceptions\ApiException;
+use App\Http\Middleware\EnforceIdempotency;
 use App\Models\IdempotencyKey;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
@@ -212,6 +215,79 @@ class IdempotencyMiddlewareTest extends TestCase
             'title' => 'Invalid Idempotency Key',
             'status' => 400,
         ]);
+    }
+
+    public function test_query_string_changes_are_not_replayed(): void
+    {
+        $payload = ['action' => 'query_test', 'amount' => 1];
+        $this->withHeader('Idempotency-Key', 'query-key')
+            ->postJson('/api/v1/test/idempotent-mutation?target=one', $payload)->assertStatus(201);
+
+        $this->postJson('/api/v1/test/idempotent-mutation?target=two', $payload)
+            ->assertStatus(422)->assertJsonPath('code', 'IDEMPOTENCY_PAYLOAD_MISMATCH');
+
+        $this->assertSame(1, DB::table('audit_events')->where('subject_type', 'test_mutation')->count());
+    }
+
+    public function test_non_success_response_rolls_back_mutation_and_reservation(): void
+    {
+        $request = Request::create('/api/v1/test/atomic', 'POST', server: ['HTTP_IDEMPOTENCY_KEY' => 'atomic-key']);
+        $middleware = app(EnforceIdempotency::class);
+
+        $response = $middleware->handle($request, function () {
+            User::factory()->create(['email' => 'atomic@example.test']);
+
+            return response()->json(['status' => 'error'], 422);
+        });
+
+        $this->assertSame(422, $response->getStatusCode());
+        $this->assertDatabaseMissing('users', ['email' => 'atomic@example.test']);
+        $this->assertDatabaseMissing('idempotency_keys', ['key' => 'atomic-key']);
+
+        $response = $middleware->handle($request, function () {
+            User::factory()->create(['email' => 'atomic@example.test']);
+
+            return response()->json(['status' => 'success'], 201);
+        });
+
+        $this->assertSame(201, $response->getStatusCode());
+        $this->assertDatabaseHas('users', ['email' => 'atomic@example.test']);
+        $this->assertDatabaseHas('idempotency_keys', ['key' => 'atomic-key', 'status' => 'completed']);
+    }
+
+    public function test_sensitive_response_is_never_cached_or_committed(): void
+    {
+        $request = Request::create('/api/v1/test/atomic', 'POST', server: ['HTTP_IDEMPOTENCY_KEY' => 'sensitive-response']);
+
+        try {
+            app(EnforceIdempotency::class)->handle($request, function () {
+                User::factory()->create(['email' => 'sensitive@example.test']);
+
+                return response()->json(['data' => ['access_token' => 'example']]);
+            });
+            $this->fail('Sensitive response must not be cached');
+        } catch (ApiException $exception) {
+            $this->assertSame(500, $exception->getStatus());
+        }
+
+        $this->assertDatabaseMissing('users', ['email' => 'sensitive@example.test']);
+        $this->assertDatabaseMissing('idempotency_keys', ['key' => 'sensitive-response']);
+    }
+
+    public function test_replay_preserves_original_response_language(): void
+    {
+        $payload = ['action' => 'localized_replay', 'amount' => 1];
+
+        $this->postJson('/api/v1/test/idempotent-mutation', $payload, [
+            'Idempotency-Key' => 'language-key',
+            'Accept-Language' => 'ar',
+        ])->assertStatus(201)->assertHeader('Content-Language', 'ar');
+
+        $this->postJson('/api/v1/test/idempotent-mutation', $payload, [
+            'Idempotency-Key' => 'language-key',
+            'Accept-Language' => 'en',
+        ])->assertStatus(201)->assertHeader('Idempotent-Replayed', 'true')
+            ->assertHeader('Content-Language', 'ar');
     }
 
     public function test_get_request_ignores_idempotency_key(): void
