@@ -16,9 +16,9 @@ final readonly class LogoutAction
         private AuthenticationAudit $audit,
     ) {}
 
-    public function execute(int $accountId, bool $allDevices, ?int $tokenId, bool $stateful, string $ip): void
+    public function execute(int $accountId, bool $allDevices, ?int $tokenId, ?string $tokenName, bool $stateful, string $ip): void
     {
-        $this->tokens->revoke($accountId, $allDevices, $tokenId);
+        $this->tokens->revoke($accountId, $allDevices, $tokenId, $tokenName);
 
         if ($stateful) {
             $this->sessions->destroy();
