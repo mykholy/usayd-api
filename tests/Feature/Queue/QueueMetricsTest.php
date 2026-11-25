@@ -23,7 +23,8 @@ class QueueMetricsTest extends TestCase
             'failed_at' => now(),
         ]);
 
-        $response = $this->getJson('/api/v1/queue/metrics');
+        config(['services.ops.token' => 'test-ops-token']);
+        $response = $this->withToken('test-ops-token')->getJson('/api/v1/queue/metrics');
 
         $response->assertStatus(200);
         $response->assertJsonStructure([
@@ -47,7 +48,7 @@ class QueueMetricsTest extends TestCase
         $this->assertArrayHasKey('reports', $response->json('data.partitions'));
     }
 
-    public function test_queue_metrics_forbidden_without_authorization_in_production(): void
+    public function test_queue_metrics_forbidden_without_authorization_even_in_testing(): void
     {
         $this->app->detectEnvironment(fn () => 'production');
 

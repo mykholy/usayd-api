@@ -7,7 +7,6 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\App;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
@@ -25,17 +24,16 @@ class ProblemDetailsResponse
         $traceId = (string) ($request->attributes->get('traceId') ?? Str::uuid());
 
         $locale = self::resolveLocale($request);
-        App::setLocale($locale);
 
-        $defaultTitle = __("errors.{$errorCode}.title");
-        $defaultDetail = __("errors.{$errorCode}.detail");
+        $defaultTitle = __("errors.{$errorCode}.title", [], $locale);
+        $defaultDetail = __("errors.{$errorCode}.detail", [], $locale);
 
         // Fallbacks if localization key missing
         if ($defaultTitle === "errors.{$errorCode}.title") {
-            $defaultTitle = self::fallbackTitle($status);
+            $defaultTitle = __('errors.INTERNAL_ERROR.title', [], $locale);
         }
         if ($defaultDetail === "errors.{$errorCode}.detail") {
-            $defaultDetail = self::fallbackDetail($status);
+            $defaultDetail = __('errors.INTERNAL_ERROR.detail', [], $locale);
         }
 
         $title = $defaultTitle;
@@ -44,6 +42,8 @@ class ProblemDetailsResponse
         $extensions = [];
         $responseHeaders = [
             'Content-Type' => 'application/problem+json',
+            'Content-Language' => $locale,
+            'Vary' => 'Accept-Language',
             'X-Request-ID' => $traceId,
             'X-Trace-ID' => $traceId,
         ];
@@ -63,9 +63,7 @@ class ProblemDetailsResponse
             }
         } elseif ($exception instanceof ValidationException) {
             $invalidParams = $exception->errors();
-            $detail = $locale === 'ar'
-                ? 'فشل التحقق من صحة حقول الإدخال المقدمة.'
-                : 'The given input data was invalid.';
+            $detail = $defaultDetail;
         } elseif (config('app.debug') && $status === 500) {
             // Only leak raw exception message in local debug mode
             $detail = $exception->getMessage() ?: $defaultDetail;
@@ -162,43 +160,13 @@ class ProblemDetailsResponse
             409 => 'CONFLICT',
             422 => 'VALIDATION_FAILED',
             429 => 'RATE_LIMITED',
+            503 => 'SERVICE_UNAVAILABLE',
             default => 'INTERNAL_ERROR',
         };
     }
 
     protected static function resolveLocale(Request $request): string
     {
-        $accept = $request->header('Accept-Language', 'ar');
-        if (str_starts_with(strtolower($accept), 'en')) {
-            return 'en';
-        }
-
-        return 'ar';
-    }
-
-    protected static function fallbackTitle(int $status): string
-    {
-        return match ($status) {
-            401 => 'غير مصرح',
-            403 => 'ممنوع الوصول',
-            404 => 'المورد غير موجود',
-            409 => 'تعارض في البيانات',
-            422 => 'بيانات غير صالحة',
-            429 => 'تجاوز الحد المسموح',
-            default => 'خطأ داخلي في الخادم',
-        };
-    }
-
-    protected static function fallbackDetail(int $status): string
-    {
-        return match ($status) {
-            401 => 'يجب تسجيل الدخول للوصول إلى هذا المورد.',
-            403 => 'ليس لديك صلاحيات كافية لتنفيذ هذا الإجراء.',
-            404 => 'لم يتم العثور على المورد المطلوب.',
-            409 => 'تعذر إتمام الإجراء بسبب تعارض في حالة البيانات الحالية.',
-            422 => 'يرجى مراجعة وتصحيح حقول الإدخال وإعادة المحاولة.',
-            429 => 'لقد تجاوزت معدل الطلبات المسموح به، يرجى الانتظار والمحاولة لاحقاً.',
-            default => 'حدث خطأ غير متوقع أثناء معالجة طلبك، يرجى تزويد الدعم الفني بمعرف التتبع.',
-        };
+        return $request->attributes->get('api_locale') ?? $request->getPreferredLanguage(['ar', 'en']) ?? 'ar';
     }
 }

@@ -99,6 +99,10 @@ jobs:
         if: steps.state.outputs.is_bootstrapped == 'true'
         run: ./vendor/bin/pint --test
 
+      - name: Verify architecture boundaries after bootstrap
+        if: steps.state.outputs.is_bootstrapped == 'true'
+        run: python scripts/verify_architecture_boundaries.py
+
       - name: Verify database foundations & anti-PostgreSQL rules
         if: steps.state.outputs.is_bootstrapped == 'true'
         run: python scripts/verify_database_foundations.py

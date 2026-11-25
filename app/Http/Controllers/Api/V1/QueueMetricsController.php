@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Exceptions\ApiException;
 use App\Http\Controllers\Controller;
 use App\Services\Queue\QueueMetricsService;
 use Illuminate\Http\JsonResponse;
@@ -19,22 +20,15 @@ class QueueMetricsController extends Controller
      */
     public function metrics(Request $request): JsonResponse
     {
-        $opsToken = config('services.ops.token') ?? env('OPS_METRICS_TOKEN');
+        $opsToken = config('services.ops.token');
         $authHeader = $request->bearerToken();
         $user = $request->user();
 
         $isAuthorized = ($user && in_array($user->role ?? '', ['admin', 'superadmin', 'operator'], true))
-            || ($opsToken && hash_equals((string) $opsToken, (string) $authHeader))
-            || app()->environment('testing');
+            || ($opsToken && hash_equals((string) $opsToken, (string) $authHeader));
 
         if (! $isAuthorized) {
-            return response()->json([
-                'type' => 'https://api.usayd.academy/errors/forbidden',
-                'title' => 'Forbidden',
-                'status' => 403,
-                'detail' => 'Queue metrics are restricted to authorized operational staff.',
-                'instance' => $request->getRequestUri(),
-            ], 403, ['Content-Type' => 'application/problem+json']);
+            throw ApiException::forbidden(__('api.queue_forbidden'));
         }
 
         $metrics = $this->metricsService->getMetrics();

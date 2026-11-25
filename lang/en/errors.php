@@ -37,4 +37,8 @@ return [
         'title' => 'Method Not Allowed',
         'detail' => 'The HTTP method used is not supported for this route.',
     ],
+    'SERVICE_UNAVAILABLE' => [
+        'title' => 'Service Unavailable',
+        'detail' => 'The service is temporarily unavailable. Please retry later.',
+    ],
 ];

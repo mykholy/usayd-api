@@ -21,14 +21,14 @@ class CheckFeatureFlag
 
         if (! FeatureFlagService::isEnabled($flagKey, $user)) {
             if ($mode === '404' || $mode === 'hidden') {
-                throw ApiException::notFound('The requested resource was not found.');
+                throw ApiException::notFound(__('errors.RESOURCE_NOT_FOUND.detail'));
             }
 
             throw new ApiException(
                 status: 503,
                 errorCode: 'FEATURE_DISABLED',
-                detail: "The feature '{$flagKey}' is currently disabled or under maintenance.",
-                title: 'Feature Disabled',
+                detail: __('api.feature_disabled', ['feature' => $flagKey]),
+                title: __('api.feature_disabled_title'),
                 errors: ['feature' => $flagKey],
                 extensions: ['feature' => $flagKey]
             );
