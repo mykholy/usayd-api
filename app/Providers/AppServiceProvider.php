@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Modules\Learning\Infrastructure\Providers\LearningServiceProvider;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -11,7 +12,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        $this->app->register(\App\Modules\Learning\Infrastructure\Providers\LearningServiceProvider::class);
+        $this->app->register(LearningServiceProvider::class);
     }
 
     /**
