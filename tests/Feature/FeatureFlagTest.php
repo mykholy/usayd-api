@@ -247,6 +247,43 @@ class FeatureFlagTest extends TestCase
             ->assertStatus(403);
     }
 
+    public function test_user_targeting_matches_numeric_model_id_to_string_rule(): void
+    {
+        $user = User::factory()->create();
+        $other = User::factory()->create();
+        FeatureFlag::query()->create([
+            'key' => 'feature_in_app_video',
+            'name' => 'Video',
+            'is_enabled' => true,
+            'rules' => ['users' => [(string) $user->id]],
+        ]);
+
+        $this->assertTrue(FeatureFlagService::isEnabled('feature_in_app_video', $user));
+        $this->assertFalse(FeatureFlagService::isEnabled('feature_in_app_video', $other));
+    }
+
+    public function test_critical_flag_never_uses_stale_enabled_cache(): void
+    {
+        FeatureFlag::query()->create([
+            'key' => 'feature_recording',
+            'name' => 'Recording',
+            'is_enabled' => false,
+        ]);
+        Cache::put('usayd:feature_flag:feature_recording', ['is_enabled' => true, 'rules' => null], 60);
+
+        $this->assertFalse(FeatureFlagService::isEnabled('feature_recording'));
+    }
+
+    public function test_unknown_targeting_rule_is_rejected(): void
+    {
+        Sanctum::actingAs(User::factory()->create(['role' => 'admin']), ['access-api']);
+
+        $this->putJson('/api/v1/admin/feature-flags/feature_recording', [
+            'is_enabled' => true,
+            'rules' => ['unexpected' => true],
+        ], ['X-Audit-Reason' => 'Validate targeting schema'])->assertStatus(422);
+    }
+
     public function test_cache_outage_fails_safe_without_server_error(): void
     {
         Cache::shouldReceive('get')->andThrow(new \Exception('Redis connection failure'));

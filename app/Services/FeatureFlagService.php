@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\FeatureFlag;
 use App\Models\User;
+use App\Platform\FeatureFlags\Domain\TargetingRules;
 use Illuminate\Support\Facades\Cache;
 use Throwable;
 
@@ -106,6 +107,11 @@ class FeatureFlagService
      */
     public static function getFlagData(string $key): ?array
     {
+        // Safety-critical and kill-switch decisions must never depend on stale cache.
+        if (self::isCriticalFlag($key) || $key === 'feature_waitlist_only') {
+            return self::fetchFromDatabase($key);
+        }
+
         $cacheKey = self::CACHE_PREFIX.$key;
         $lockKey = "usayd:lock:flag:{$key}";
 
@@ -192,42 +198,12 @@ class FeatureFlagService
      */
     private static function evaluateRules(array $rules, ?User $user): bool
     {
-        // 1. Allowed roles rule
-        if (isset($rules['roles']) && is_array($rules['roles'])) {
-            if (! $user || ! in_array($user->role, $rules['roles'], true)) {
-                return false;
-            }
-        }
-
-        // 2. Allowed user IDs rule
-        if (isset($rules['users']) && is_array($rules['users'])) {
-            if (! $user || ! in_array($user->id, $rules['users'], true)) {
-                return false;
-            }
-        }
-
-        // 3. Allowed countries rule
-        if (isset($rules['countries']) && is_array($rules['countries'])) {
-            $userCountry = $user?->country;
-            if (! $userCountry || ! in_array(strtoupper($userCountry), array_map('strtoupper', $rules['countries']), true)) {
-                return false;
-            }
-        }
-
-        // 4. Percentage rollout rule (0-100)
-        if (isset($rules['percentage']) && is_numeric($rules['percentage'])) {
-            $percentage = (int) $rules['percentage'];
-            if ($percentage <= 0) {
-                return false;
-            }
-            if ($percentage >= 100) {
-                return true;
-            }
-            $targetId = $user ? $user->id : (crc32(request()->ip() ?? '127.0.0.1'));
-
-            return ($targetId % 100) < $percentage;
-        }
-
-        return true;
+        return (new TargetingRules)->matches(
+            $user ? array_filter($rules, fn ($value) => $value !== null) : $rules,
+            $user ? (string) $user->id : null,
+            $user?->role,
+            $user?->country,
+            request()->ip() ?? '127.0.0.1',
+        );
     }
 }
