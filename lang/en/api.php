@@ -18,6 +18,7 @@ return [
     'feature_flag_missing' => 'The requested feature flag does not exist.',
     'feature_flag_updated' => 'Feature flag updated successfully.',
     'health_unavailable' => 'One or more critical backend dependencies failed health verification.',
+    'idempotency_response_unsafe' => 'This operation cannot be safely stored and replayed.',
     'idempotency_invalid_title' => 'Invalid Idempotency Key',
     'idempotency_invalid_detail' => 'The Idempotency-Key header must be between 1 and 255 printable ASCII characters without whitespace.',
     'idempotency_mismatch_title' => 'Idempotency Payload Mismatch',
