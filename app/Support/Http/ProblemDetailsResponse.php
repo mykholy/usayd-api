@@ -3,6 +3,8 @@
 namespace App\Support\Http;
 
 use App\Exceptions\ApiException;
+use App\Modules\Identity\Domain\Exceptions\InvalidCredentials;
+use App\Modules\Identity\Domain\Exceptions\LoginThrottled;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\JsonResponse;
@@ -19,11 +21,16 @@ class ProblemDetailsResponse
      */
     public static function fromThrowable(Throwable $exception, Request $request): JsonResponse
     {
+        $locale = self::resolveLocale($request);
+        if ($exception instanceof InvalidCredentials) {
+            $exception = ApiException::unauthorized(__('identity.invalid_credentials', [], $locale));
+        } elseif ($exception instanceof LoginThrottled) {
+            $exception = ApiException::rateLimited(__('identity.throttled', ['seconds' => $exception->retryAfter], $locale), $exception->retryAfter);
+        }
+
         $status = self::resolveStatus($exception);
         $errorCode = self::resolveErrorCode($exception, $status);
         $traceId = (string) ($request->attributes->get('traceId') ?? Str::uuid());
-
-        $locale = self::resolveLocale($request);
 
         $defaultTitle = __("errors.{$errorCode}.title", [], $locale);
         $defaultDetail = __("errors.{$errorCode}.detail", [], $locale);

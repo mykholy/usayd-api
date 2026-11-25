@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Modules\Identity\Infrastructure\Providers\IdentityServiceProvider;
 use App\Modules\Learning\Infrastructure\Providers\LearningServiceProvider;
 use Illuminate\Support\ServiceProvider;
 
@@ -12,6 +13,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        $this->app->register(IdentityServiceProvider::class);
         $this->app->register(LearningServiceProvider::class);
     }
 
