@@ -39,7 +39,14 @@ final class AuthController
         $user = $request->user();
         $token = $user->currentAccessToken();
 
-        $action->execute((int) $user->id, $request->boolean('all_devices'), $token instanceof PersonalAccessToken ? (int) $token->id : null, $request->hasSession(), $request->ip() ?? '');
+        $action->execute(
+            (int) $user->id,
+            $request->boolean('all_devices'),
+            $token instanceof PersonalAccessToken ? (int) $token->id : null,
+            $token instanceof PersonalAccessToken ? (string) $token->name : null,
+            $request->hasSession(),
+            $request->ip() ?? '',
+        );
 
         return response()->json([
             'status' => 'success',

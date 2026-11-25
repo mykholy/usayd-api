@@ -81,13 +81,15 @@ class TokenService
                 return ApiException::unauthorized(__('identity.invalid_refresh'));
             }
 
-            $family = $this->familyName($token);
-            $this->deleteFamily($user, $token);
+            $family = $this->familyName((string) $token->name);
+            $this->deleteFamily($user, $family, (int) $token->id);
 
-            // Legacy device-only names are promoted to unique family IDs on rotation.
-            if ($family === null || ! str_contains($family, ':')) {
-                $device = $family ?? (preg_replace('/[^a-zA-Z0-9_\-\.]/', '-', (string) $deviceName) ?: 'mobile');
+            // Deterministically map legacy families so a concurrent logout can revoke the replacement.
+            if ($family === null) {
+                $device = preg_replace('/[^a-zA-Z0-9_\-\.]/', '-', (string) $deviceName) ?: 'mobile';
                 $family = $device.':'.Str::uuid();
+            } elseif (! str_contains($family, ':')) {
+                $family = $this->legacyReplacement($user, $family);
             }
 
             $tokens = $this->issuePair($user, $family);
@@ -123,18 +125,28 @@ class TokenService
 
     public function revokeDeviceToken(User $user, PersonalAccessToken $token): void
     {
-        DB::transaction(function () use ($user, $token): void {
+        if ((int) $token->tokenable_id !== (int) $user->id || $token->tokenable_type !== $user->getMorphClass()) {
+            return;
+        }
+
+        $this->revokeAuthenticatedToken($user, (int) $token->id, (string) $token->name);
+    }
+
+    /**
+     * Token identity is captured from the authenticated server-side model, never request input.
+     */
+    public function revokeAuthenticatedToken(User $user, int $tokenId, string $tokenName): void
+    {
+        $family = $this->familyName($tokenName);
+
+        DB::transaction(function () use ($user, $tokenId, $family): void {
             $account = User::query()->lockForUpdate()->findOrFail($user->getKey());
-            $record = $account->tokens()->find($token->getKey());
-            if ($record instanceof PersonalAccessToken) {
-                $this->deleteFamily($account, $record);
-            }
+            $this->deleteFamily($account, $family, $tokenId);
         });
     }
 
-    private function familyName(PersonalAccessToken $token): ?string
+    private function familyName(string $name): ?string
     {
-        $name = (string) $token->name;
         foreach ([':access', ':refresh'] as $suffix) {
             if (str_ends_with($name, $suffix)) {
                 return substr($name, 0, -strlen($suffix));
@@ -144,16 +156,27 @@ class TokenService
         return null;
     }
 
-    private function deleteFamily(User $user, PersonalAccessToken $token): void
+    private function legacyReplacement(User $user, string $family): string
     {
-        $family = $this->familyName($token);
+        return $family.':legacy-'.substr(hash('sha256', $user->id.'|'.$family), 0, 32);
+    }
+
+    private function deleteFamily(User $user, ?string $family, int $tokenId): void
+    {
         if ($family === null) {
-            $token->delete();
+            $user->tokens()->whereKey($tokenId)->delete();
 
             return;
         }
 
-        $user->tokens()->whereIn('name', [$family.':access', $family.':refresh'])->delete();
+        $names = [$family.':access', $family.':refresh'];
+        if (! str_contains($family, ':')) {
+            $replacement = $this->legacyReplacement($user, $family);
+            $names[] = $replacement.':access';
+            $names[] = $replacement.':refresh';
+        }
+
+        $user->tokens()->whereIn('name', $names)->delete();
     }
 
     public function revokeCurrentToken(Request $request): void

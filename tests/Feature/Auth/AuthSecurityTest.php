@@ -407,6 +407,39 @@ class AuthSecurityTest extends TestCase
         $this->assertNotNull(PersonalAccessToken::findToken($second['refresh_token']));
     }
 
+    public function test_logout_revokes_rotated_family_using_captured_access_token_identity(): void
+    {
+        $user = User::factory()->create();
+        $service = app(TokenService::class);
+        $tokens = $service->issueTokens($user, 'mobile');
+        $independent = $service->issueTokens($user, 'mobile');
+        $captured = PersonalAccessToken::findToken($tokens['access_token']);
+
+        $replacement = $service->rotateRefreshToken($tokens['refresh_token']);
+
+        app(TokenManager::class)->revoke($user->id, false, $captured->id, $captured->name);
+
+        $this->assertNull(PersonalAccessToken::findToken($replacement['access_token']));
+        $this->assertNull(PersonalAccessToken::findToken($replacement['refresh_token']));
+        $this->assertNotNull(PersonalAccessToken::findToken($independent['access_token']));
+    }
+
+    public function test_logout_of_legacy_family_revokes_rotated_replacement_only(): void
+    {
+        $user = User::factory()->create();
+        $service = app(TokenService::class);
+        $access = $user->createToken('mobile:access', ['access-api'], now()->addHour());
+        $refresh = $user->createToken('mobile:refresh', ['issue-token'], now()->addDay());
+        $independent = $service->issueTokens($user, 'mobile');
+
+        $replacement = $service->rotateRefreshToken($refresh->plainTextToken);
+        $service->revokeDeviceToken($user, $access->accessToken);
+
+        $this->assertNull(PersonalAccessToken::findToken($replacement['access_token']));
+        $this->assertNull(PersonalAccessToken::findToken($replacement['refresh_token']));
+        $this->assertNotNull(PersonalAccessToken::findToken($independent['refresh_token']));
+    }
+
     public function test_expired_refresh_token_cleanup_is_committed(): void
     {
         $user = User::factory()->create();
