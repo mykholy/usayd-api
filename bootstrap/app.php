@@ -5,6 +5,7 @@ use App\Http\Middleware\CheckFeatureFlag;
 use App\Http\Middleware\EnforceIdempotency;
 use App\Http\Middleware\EnsureRole;
 use App\Http\Middleware\RequireReasonMetadata;
+use App\Http\Middleware\SetApiLocale;
 use App\Support\Http\ProblemDetailsResponse;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -23,6 +24,7 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->api(prepend: [
+            SetApiLocale::class,
             EnsureFrontendRequestsAreStateful::class,
         ]);
         $middleware->append(AssignTraceId::class);

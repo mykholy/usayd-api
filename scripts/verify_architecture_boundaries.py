@@ -104,7 +104,7 @@ def scan_module_source_boundaries(app_modules_dir):
     """
     violations = []
     if not app_modules_dir.exists():
-        return violations
+        return [{'type': 'MODULE_ROOT_MISSING', 'file': str(app_modules_dir), 'line': 0}]
 
     import_regex = re.compile(r"use\s+App\\Modules\\([A-Za-z0-9]+)\\([A-Za-z0-9\\]+);")
     sql_regex = re.compile(r"""(?:DB::table|from)\(\s*['"]([a-zA-Z0-9_]+)['"]\s*\)""")
@@ -161,7 +161,8 @@ def test_positive_real_modules_boundary_check():
     app_modules_dir = REPO_ROOT / "app" / "Modules"
     violations = scan_module_source_boundaries(app_modules_dir)
     assert not violations, f"Boundary violations detected in app/Modules: {violations}"
-    print("  -> PASS (Zero architectural boundary violations in production modules)")
+    assert any(app_modules_dir.rglob("*.php")), "No implemented production modules found"
+    print("  -> PASS (Zero detected architectural boundary violations in implemented modules)")
 
 
 def test_negative_executable_cross_module_fixtures():

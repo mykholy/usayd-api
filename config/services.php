@@ -14,6 +14,10 @@ return [
     |
     */
 
+    'ops' => [
+        'token' => env('OPS_METRICS_TOKEN'),
+    ],
+
     'postmark' => [
         'key' => env('POSTMARK_API_KEY'),
     ],

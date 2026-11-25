@@ -5,3 +5,7 @@ This is one of THREE independent repositories; keep contracts versioned, do not 
 Target component: `api`. Changes may reference shared contracts but never silently modify a different repository.
 Scope one Jira ticket per branch/PR, verified tests, safety review, branch protection, no fabricated API, no unapproved product/legal/academic decisions, no bypass of CI.
 For approved design implement original styles and accessibility; for API use MySQL 8.4 transactions and negative policy tests; for mobile distinguish fixtures from real integration.
+
+## Mandatory incremental architecture standard
+
+Follow `docs/standards/BACKEND_ENGINEERING.md`. Do not add new fat controllers, route closure business logic, untranslated client-facing text, or cross-module internal dependencies. A green style check does not prove architectural compliance. Preserve API contracts; add regression tests and document every public endpoint change. Do not bypass CI or required reviews.

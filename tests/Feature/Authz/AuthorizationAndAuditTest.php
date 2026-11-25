@@ -150,7 +150,7 @@ class AuthorizationAndAuditTest extends TestCase
 
         // Attempt override without X-Audit-Reason or reason payload
         $response = $this->withHeaders(['Accept' => 'application/json'])
-            ->postJson("/api/v1/learning-plans/{$plan->id}/override");
+            ->postJson("/api/v1/learning-plans/{$plan->id}/override", [], ['Accept-Language' => 'en']);
 
         $response->assertStatus(403);
         $this->assertStringContainsString('application/problem+json', (string) $response->headers->get('Content-Type'));

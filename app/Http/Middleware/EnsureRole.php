@@ -17,7 +17,7 @@ class EnsureRole
         $user = $request->user();
 
         if (! $user || ! $user->hasRole($roles)) {
-            throw ApiException::forbidden('You do not possess the required role permissions to perform this action.');
+            throw ApiException::forbidden(__('api.role_required'));
         }
 
         return $next($request);
