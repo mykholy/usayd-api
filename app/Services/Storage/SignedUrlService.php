@@ -16,6 +16,8 @@ class SignedUrlService
 
     public const DEFAULT_EXPIRATION_SECONDS = 900; // 15 minutes
 
+    public function __construct(private readonly OwnedStoragePath $ownedPath) {}
+
     /**
      * Generate a cryptographic HMAC-SHA256 signed URL for accessing a private storage asset.
      */
@@ -27,6 +29,7 @@ class SignedUrlService
         ?User $actor = null
     ): array {
         $cleanPath = $this->sanitizePath($path);
+        $this->ownedPath->assertOwned($cleanPath, $ownerId, $disk);
 
         $clampedExpiresIn = max(self::MIN_EXPIRATION_SECONDS, min(self::MAX_EXPIRATION_SECONDS, $expiresInSeconds));
         $expiresAt = now()->addSeconds($clampedExpiresIn)->timestamp;
@@ -83,7 +86,7 @@ class SignedUrlService
         $ownerId = $request->query('owner_id') !== null ? (int) $request->query('owner_id') : null;
         $disk = (string) ($request->query('disk') ?? 'private');
 
-        if (! $path || ! $expires || ! $signature) {
+        if (! is_string($path) || $path === '' || ! $expires || ! $signature) {
             throw new ApiException(400, 'BAD_REQUEST', __('api.storage_signed_parameters'));
         }
 
@@ -99,6 +102,8 @@ class SignedUrlService
         if (! hash_equals($expectedSignature, $signature)) {
             throw new ApiException(403, 'FORBIDDEN', __('api.storage_signature_invalid'));
         }
+
+        $this->ownedPath->assertOwned($cleanPath, $ownerId, $disk);
 
         return [
             'path' => $cleanPath,

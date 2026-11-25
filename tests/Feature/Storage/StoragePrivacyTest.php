@@ -231,13 +231,58 @@ class StoragePrivacyTest extends TestCase
         $service = app(SignedUrlService::class);
         $path = 'recitations/1/ghost_file.mp3';
         $expires = now()->addMinutes(15)->timestamp;
-        $signature = $service->createSignature($path, $expires, null, 'private');
+        $signature = $service->createSignature($path, $expires, 1, 'private');
 
         $response = $this->withHeaders(['Accept' => 'application/json', 'Accept-Language' => 'en'])
-            ->getJson("/api/v1/storage/download?path={$path}&expires={$expires}&signature={$signature}&disk=private");
+            ->getJson("/api/v1/storage/download?path={$path}&expires={$expires}&signature={$signature}&disk=private&owner_id=1");
 
         $response->assertStatus(404);
         $this->assertStringContainsString('application/problem+json', (string) $response->headers->get('Content-Type'));
         $this->assertStringContainsString('not found', (string) $response->json('detail'));
+    }
+
+    public function test_claimed_owner_cannot_be_used_to_sign_another_learners_path(): void
+    {
+        $actor = User::factory()->create(['role' => 'learner']);
+        $other = User::factory()->create(['role' => 'learner']);
+        Sanctum::actingAs($actor, ['access-api']);
+
+        $this->postJson('/api/v1/storage/signed-url', [
+            'path' => "recitations/{$other->id}/private.mp3",
+            'owner_id' => $actor->id,
+        ], ['Accept-Language' => 'ar'])
+            ->assertStatus(403)
+            ->assertJsonPath('detail', 'ليس لديك صلاحية الوصول إلى هذا الملف.');
+
+        $this->assertDatabaseMissing('audit_events', [
+            'action' => 'storage.signed_url_generated',
+            'subject_id' => "recitations/{$other->id}/private.mp3",
+        ]);
+    }
+
+    public function test_unknown_namespace_and_non_private_disk_are_rejected(): void
+    {
+        $actor = User::factory()->create(['role' => 'learner']);
+        Sanctum::actingAs($actor, ['access-api']);
+
+        $this->postJson('/api/v1/storage/signed-url', [
+            'path' => "internal/{$actor->id}/secret.txt",
+        ])->assertStatus(403);
+
+        $this->postJson('/api/v1/storage/signed-url', [
+            'path' => "recitations/{$actor->id}/audio.mp3",
+            'disk' => 'public',
+        ])->assertStatus(403);
+    }
+
+    public function test_previously_signed_mismatched_owner_link_is_rejected(): void
+    {
+        $service = app(SignedUrlService::class);
+        $path = 'recitations/2/private.mp3';
+        $expires = now()->addMinutes(15)->timestamp;
+        $signature = $service->createSignature($path, $expires, 1, 'private');
+
+        $this->getJson("/api/v1/storage/download?path={$path}&expires={$expires}&signature={$signature}&disk=private&owner_id=1")
+            ->assertStatus(403);
     }
 }
