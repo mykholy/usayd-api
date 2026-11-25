@@ -22,6 +22,10 @@ class TokenService
      */
     public function issueTokens(User $user, ?string $deviceName = 'mobile-device'): array
     {
+        if (($user->status ?? $user->fresh()?->status) !== 'active') {
+            throw ApiException::unauthorized(__('identity.invalid_credentials'));
+        }
+
         $sanitizedDevice = preg_replace('/[^a-zA-Z0-9_\-\.]/', '-', (string) $deviceName) ?: 'device';
 
         // Issue access token (expires in 60 minutes)
@@ -73,23 +77,23 @@ class TokenService
             }
 
             if (! $token) {
-                throw ApiException::unauthorized('Invalid or unrecognised refresh token.');
+                throw ApiException::unauthorized(__('identity.invalid_refresh'));
             }
 
             if (! $token->can('issue-token')) {
-                throw ApiException::forbidden('The provided token does not hold refresh authorization.');
+                throw ApiException::forbidden(__('identity.refresh_forbidden'));
             }
 
             if ($token->expires_at && $token->expires_at->isPast()) {
                 $token->delete();
-                throw ApiException::unauthorized('Refresh token has expired.');
+                throw ApiException::unauthorized(__('identity.refresh_expired'));
             }
 
             /** @var User|null $user */
             $user = $token->tokenable;
-            if (! $user instanceof User) {
+            if (! $user instanceof User || $user->status !== 'active') {
                 $token->delete();
-                throw ApiException::unauthorized('Associated user account is no longer valid.');
+                throw ApiException::unauthorized(__('identity.invalid_refresh'));
             }
 
             $tokenName = (string) $token->name;
@@ -130,15 +134,22 @@ class TokenService
             return;
         }
 
-        if (method_exists($user, 'currentAccessToken') && ($token = $user->currentAccessToken())) {
-            $tokenName = (string) $token->name;
-            if (str_contains($tokenName, ':')) {
-                [$devicePrefix] = explode(':', $tokenName, 2);
-                // Revoke both access and refresh tokens for this device
-                $user->tokens()->where('name', 'like', "{$devicePrefix}:%")->delete();
-            } else {
-                $token->delete();
-            }
+        $token = $user->currentAccessToken();
+
+        if ($token instanceof PersonalAccessToken) {
+            $this->revokeDeviceToken($user, $token);
+        }
+    }
+
+    public function revokeDeviceToken(User $user, PersonalAccessToken $token): void
+    {
+        $tokenName = (string) $token->name;
+
+        if (str_contains($tokenName, ':')) {
+            [$devicePrefix] = explode(':', $tokenName, 2);
+            $user->tokens()->whereIn('name', ["{$devicePrefix}:access", "{$devicePrefix}:refresh"])->delete();
+        } else {
+            $token->delete();
         }
     }
 

@@ -372,6 +372,23 @@ class AuthSecurityTest extends TestCase
         $this->assertEquals(0, $user->fresh()->tokens()->count());
     }
 
+    public function test_inactive_account_cannot_log_in_or_refresh(): void
+    {
+        $user = User::factory()->create(['password' => Hash::make('CorrectPassword')]);
+        $tokens = app(TokenService::class)->issueTokens($user);
+        $user->update(['status' => 'suspended']);
+
+        $this->postJson('/api/v1/auth/login', [
+            'email' => $user->email,
+            'password' => 'CorrectPassword',
+        ], ['Accept-Language' => 'ar'])->assertStatus(401)
+            ->assertJsonPath('detail', 'البريد الإلكتروني أو كلمة المرور غير صحيحة.');
+
+        $this->postJson('/api/v1/auth/refresh', [
+            'refresh_token' => $tokens['refresh_token'],
+        ], ['Accept-Language' => 'en'])->assertStatus(401);
+    }
+
     public function test_csrf_cookie_endpoint_is_accessible(): void
     {
         $response = $this->get('/sanctum/csrf-cookie');
