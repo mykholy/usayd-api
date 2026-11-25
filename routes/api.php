@@ -33,14 +33,14 @@ Route::prefix('v1')->group(function () {
         Route::post('/login', [AuthController::class, 'login'])->name('api.v1.auth.login');
         Route::post('/refresh', [AuthController::class, 'refresh'])->name('api.v1.auth.refresh');
 
-        Route::middleware(['auth:sanctum', 'ability:access-api'])->group(function () {
+        Route::middleware(['auth:sanctum', 'ability:access-api', 'account.active'])->group(function () {
             Route::get('/me', [AuthController::class, 'me'])->name('api.v1.auth.me');
             Route::post('/logout', [AuthController::class, 'logout'])->name('api.v1.auth.logout');
         });
     });
 
     // Profile contract compliant with OpenAPI /api/v1/me
-    Route::middleware(['auth:sanctum', 'ability:access-api'])->group(function () {
+    Route::middleware(['auth:sanctum', 'ability:access-api', 'account.active'])->group(function () {
         Route::get('/me', [AuthController::class, 'me'])->name('api.v1.me');
 
         // Storage Privacy & Signed Links
@@ -51,7 +51,7 @@ Route::prefix('v1')->group(function () {
     require app_path('Modules/Learning/Http/Routes/api.php');
 
     // Administration: Feature Flags & Kill Switches
-    Route::middleware(['auth:sanctum', 'ability:access-api', 'role:admin'])->prefix('admin/feature-flags')->group(function () {
+    Route::middleware(['auth:sanctum', 'ability:access-api', 'account.active', 'role:admin'])->prefix('admin/feature-flags')->group(function () {
         Route::get('/', [FeatureFlagController::class, 'index'])->name('api.v1.admin.feature-flags.index');
         Route::put('/{key}', [FeatureFlagController::class, 'update'])
             ->middleware('require.reason')

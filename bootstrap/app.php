@@ -3,6 +3,7 @@
 use App\Http\Middleware\AssignTraceId;
 use App\Http\Middleware\CheckFeatureFlag;
 use App\Http\Middleware\EnforceIdempotency;
+use App\Http\Middleware\EnsureActiveAccount;
 use App\Http\Middleware\EnsureRole;
 use App\Http\Middleware\RequireReasonMetadata;
 use App\Http\Middleware\SetApiLocale;
@@ -33,6 +34,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'ability' => CheckForAnyAbility::class,
             'abilities' => CheckAbilities::class,
             'role' => EnsureRole::class,
+            'account.active' => EnsureActiveAccount::class,
             'require.reason' => RequireReasonMetadata::class,
             'feature' => CheckFeatureFlag::class,
         ]);

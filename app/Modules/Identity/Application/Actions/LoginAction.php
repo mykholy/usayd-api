@@ -8,6 +8,7 @@ use App\Modules\Identity\Application\DTOs\AuthenticationResult;
 use App\Modules\Identity\Application\DTOs\LoginData;
 use App\Modules\Identity\Application\Ports\AccountStore;
 use App\Modules\Identity\Application\Ports\AuthenticationAudit;
+use App\Modules\Identity\Application\Ports\IdentityTransaction;
 use App\Modules\Identity\Application\Ports\LoginAttempts;
 use App\Modules\Identity\Application\Ports\SessionAuthenticator;
 use App\Modules\Identity\Application\Ports\TokenManager;
@@ -22,6 +23,7 @@ final readonly class LoginAction
         private SessionAuthenticator $sessions,
         private TokenManager $tokens,
         private AuthenticationAudit $audit,
+        private IdentityTransaction $transaction,
     ) {}
 
     public function execute(LoginData $data): AuthenticationResult
@@ -52,9 +54,11 @@ final readonly class LoginAction
             return new AuthenticationResult(account: $account);
         }
 
-        $tokens = $this->tokens->issue($account->id, $data->deviceName);
-        $this->audit->record('auth.login.token', 'user', (string) $account->id, 'Mobile token issued', $data->ip, ['device_name' => $data->deviceName]);
+        return $this->transaction->run(function () use ($account, $data): AuthenticationResult {
+            $tokens = $this->tokens->issue($account->id, $data->deviceName);
+            $this->audit->record('auth.login.token', 'user', (string) $account->id, 'Mobile token issued', $data->ip, ['device_name' => $data->deviceName]);
 
-        return new AuthenticationResult(tokens: $tokens);
+            return new AuthenticationResult(tokens: $tokens);
+        });
     }
 }

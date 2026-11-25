@@ -12,5 +12,5 @@ interface TokenManager
     /** @return array{access_token:string, expires_in:int, refresh_token:string, token_type:string} */
     public function rotate(#[\SensitiveParameter] string $refreshToken, string $deviceName): array;
 
-    public function revoke(int $accountId, bool $allDevices, ?int $tokenId): void;
+    public function revoke(int $accountId, bool $allDevices, ?int $tokenId, ?string $tokenName): void;
 }
