@@ -50,4 +50,3 @@ class ApiLocaleTest extends TestCase
             ->assertJsonPath('detail', 'Missing required signed parameters (path, expires, signature).');
     }
 }
-
