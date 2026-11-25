@@ -466,7 +466,8 @@ class TransactionalOutboxTest extends TestCase
             headers: $message->headers
         );
 
-        // First execution: verifies and delivers
+        // The consumer only acknowledges a published message.
+        $message->markPublished();
         $job->handle();
 
         $message->refresh();
@@ -490,6 +491,62 @@ class TransactionalOutboxTest extends TestCase
             ->where('action', 'notification_delivered')
             ->count();
         $this->assertEquals(1, $deliveryAuditCountAfterSecondRun, 'Duplicate job execution must not re-process or duplicate delivery audit events.');
+    }
+
+    public function test_consumer_ignores_missing_and_unpublished_messages(): void
+    {
+        $message = $this->service->record('notification.test', 'test', 'unpublished', []);
+        $job = new DispatchOutboxNotificationJob($message->id, 'notification.test', 'test', 'unpublished');
+        $job->handle();
+
+        $this->assertTrue($message->fresh()->isPending());
+        $this->assertDatabaseMissing('audit_events', ['subject_id' => $message->id, 'action' => 'notification_delivered']);
+
+        $missingId = (string) Str::uuid();
+        (new DispatchOutboxNotificationJob($missingId, 'notification.test', 'test', 'missing'))->handle();
+        $this->assertDatabaseMissing('audit_events', ['subject_id' => $missingId, 'action' => 'notification_delivered']);
+    }
+
+    public function test_synchronous_dispatch_does_not_overwrite_consumer_acknowledgment(): void
+    {
+        $message = $this->service->record('notification.test', 'test', 'sync', []);
+
+        $this->service->publishPending(dispatcher: function (OutboxMessage $record): void {
+            (new DispatchOutboxNotificationJob($record->id, $record->event_type, $record->aggregate_type, $record->aggregate_id))->handle();
+        });
+
+        $this->assertTrue($message->fresh()->isDelivered());
+    }
+
+    public function test_delivered_message_cannot_be_replayed(): void
+    {
+        $message = $this->service->record('notification.test', 'test', 'delivered', []);
+        $message->markDelivered();
+
+        $this->artisan('usayd:outbox-replay', ['id' => $message->id])->assertExitCode(1);
+
+        $this->assertTrue($message->fresh()->isDelivered());
+        $this->assertDatabaseMissing('audit_events', ['subject_id' => $message->id, 'action' => 'outbox_message_replayed']);
+    }
+
+    public function test_duplicate_transactional_operation_rolls_back_domain_mutation(): void
+    {
+        $headers = ['idempotency_key' => 'duplicate-transactional-operation'];
+        $this->service->record('test.created', 'test', 'duplicate', [], $headers);
+
+        try {
+            $this->service->recordInTransaction(
+                callback: fn () => User::factory()->create(['email' => 'duplicate@example.test']),
+                eventType: 'test.created',
+                aggregateType: 'test',
+                aggregateId: 'duplicate',
+                payload: [],
+                headers: $headers,
+            );
+            $this->fail('Duplicate operation must fail and roll back');
+        } catch (\InvalidArgumentException) {
+            $this->assertDatabaseMissing('users', ['email' => 'duplicate@example.test']);
+        }
     }
 
     public function test_error_messages_are_sanitized_to_prevent_leaking_sensitive_tokens(): void

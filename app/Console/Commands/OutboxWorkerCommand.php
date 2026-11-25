@@ -40,6 +40,8 @@ class OutboxWorkerCommand extends Command
         $this->info("Usayd Academy — Transactional Outbox Worker started (Queue: {$queue}, Limit: {$limit}).");
 
         do {
+            $outboxService->recoverAbandonedProcessing();
+
             $processed = $outboxService->publishPending(
                 limit: $limit,
                 targetQueue: $queue,
