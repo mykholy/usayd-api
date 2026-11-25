@@ -52,9 +52,9 @@ class EnforceIdempotency
         if (! is_string($idempotencyKey) || strlen($idempotencyKey) > 255 || ! preg_match('/^[\x21-\x7E]+$/', $idempotencyKey)) {
             return $this->problemResponse(
                 type: 'https://errors.usayd.academy/idempotency/invalid-key',
-                title: 'Invalid Idempotency Key',
+                title: __('api.idempotency_invalid_title'),
                 status: 400,
-                detail: 'The Idempotency-Key header must be between 1 and 255 printable ASCII characters without whitespace.'
+                detail: __('api.idempotency_invalid_detail')
             );
         }
 
@@ -89,9 +89,9 @@ class EnforceIdempotency
                     // Different payload/user with same key: reject with 422
                     $inFlightResponse = $this->problemResponse(
                         type: 'https://errors.usayd.academy/idempotency/payload-mismatch',
-                        title: 'Idempotency Payload Mismatch',
+                        title: __('api.idempotency_mismatch_title'),
                         status: 422,
-                        detail: 'This Idempotency-Key was previously used with a different request method, URL, or payload.'
+                        detail: __('api.idempotency_mismatch_detail')
                     );
 
                     return;
@@ -99,9 +99,9 @@ class EnforceIdempotency
                     // Currently being processed: return 409 Conflict
                     $inFlightResponse = $this->problemResponse(
                         type: 'https://errors.usayd.academy/idempotency/request-in-flight',
-                        title: 'Concurrent Request In Flight',
+                        title: __('api.idempotency_inflight_title'),
                         status: 409,
-                        detail: 'A request with this Idempotency-Key is currently being processed. Please retry after completion.'
+                        detail: __('api.idempotency_inflight_detail')
                     );
 
                     return;

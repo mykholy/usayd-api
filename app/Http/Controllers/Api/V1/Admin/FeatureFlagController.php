@@ -61,7 +61,7 @@ class FeatureFlagController extends Controller
                         'rules' => $validated['rules'] ?? null,
                     ]);
                 } else {
-                    throw ApiException::notFound("Feature flag with key '{$key}' does not exist.");
+                    throw ApiException::notFound(__('api.feature_flag_missing'));
                 }
             } else {
                 $record->update([
@@ -97,7 +97,7 @@ class FeatureFlagController extends Controller
 
         return response()->json([
             'data' => $flag,
-            'message' => 'Feature flag updated successfully.',
+            'message' => __('api.feature_flag_updated'),
         ]);
     }
 }

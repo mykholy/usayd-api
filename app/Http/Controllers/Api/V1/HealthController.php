@@ -28,9 +28,9 @@ class HealthController extends Controller
         if (! $isDbConnected) {
             $payload = [
                 'type' => 'https://api.usayd.academy/errors/service-unavailable',
-                'title' => 'Service Unavailable',
+                'title' => __('errors.SERVICE_UNAVAILABLE.title'),
                 'status' => 503,
-                'detail' => 'One or more critical backend dependencies failed health verification.',
+                'detail' => __('api.health_unavailable'),
                 'instance' => $request->getRequestUri(),
                 'timestamp' => now()->toIso8601String(),
                 'services' => [
