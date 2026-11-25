@@ -37,11 +37,13 @@ class StorageController extends Controller
         $actor = $request->user();
         $targetOwnerId = $validated['owner_id'] ?? $actor->id;
 
+        $path = $this->signedUrlService->sanitizePath($validated['path']);
+
         // Authorization check: learner cannot access another learner's private files
         $this->authorizeFileAccess($actor, (int) $targetOwnerId);
 
         $result = $this->signedUrlService->generateSignedUrl(
-            path: $validated['path'],
+            path: $path,
             expiresInSeconds: $validated['expires_in'] ?? SignedUrlService::DEFAULT_EXPIRATION_SECONDS,
             ownerId: (int) $targetOwnerId,
             disk: $validated['disk'] ?? 'private',
