@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\V1\HealthController;
 use App\Http\Controllers\Api\V1\QueueMetricsController;
 use App\Http\Controllers\Api\V1\StorageController;
 use App\Models\AuditEvent;
+use App\Platform\Observability\Http\Middleware\AuthorizeQueueMetrics;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
@@ -20,7 +21,8 @@ use Illuminate\Support\Str;
 
 Route::prefix('v1')->group(function () {
     Route::get('/health', [HealthController::class, 'check'])->name('api.v1.health');
-    Route::get('/queue/metrics', [QueueMetricsController::class, 'metrics'])->name('api.v1.queue.metrics');
+    Route::get('/queue/metrics', [QueueMetricsController::class, 'metrics'])
+        ->middleware(AuthorizeQueueMetrics::class)->name('api.v1.queue.metrics');
 
     // Public cryptographically verified signed download
     Route::get('/storage/download', [StorageController::class, 'download'])->name('api.v1.storage.download');
