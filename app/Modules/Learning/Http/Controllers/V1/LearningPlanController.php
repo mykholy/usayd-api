@@ -12,11 +12,14 @@ use App\Modules\Learning\Http\Requests\UpdateLearningPlanRequest;
 use App\Modules\Learning\Http\Resources\LearningPlanResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 
 final class LearningPlanController
 {
     public function show(LearningPlan $learningPlan, ShowLearningPlan $query): LearningPlanResource
     {
+        Gate::authorize('view', $learningPlan);
+
         return new LearningPlanResource($query->execute($learningPlan));
     }
 
@@ -27,7 +30,7 @@ final class LearningPlanController
 
     public function override(Request $request, LearningPlan $learningPlan, OverrideLearningPlan $action): JsonResponse
     {
-        $result = $action->execute($learningPlan, (string) $request->attributes->get('audit_purpose'), (string) $request->user()?->role);
+        $result = $action->execute($learningPlan, (string) $request->attributes->get('audit_purpose'), (string) ($request->user()?->role));
 
         return response()->json([
             'data' => new LearningPlanResource($result->plan),

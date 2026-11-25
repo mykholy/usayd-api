@@ -50,7 +50,7 @@ class QueueMetricsTest extends TestCase
 
     public function test_queue_metrics_forbidden_without_authorization_even_in_testing(): void
     {
-        $this->app->detectEnvironment(fn () => 'production');
+        config(['services.ops.token' => null]);
 
         $response = $this->getJson('/api/v1/queue/metrics');
         $response->assertStatus(403)
