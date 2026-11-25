@@ -119,4 +119,29 @@ class HealthCheckTest extends TestCase
             ->assertJsonPath('status', 'degraded')
             ->assertJsonPath('services.redis', 'unreachable');
     }
+
+    public function test_production_never_exposes_debug_diagnostics_even_if_enabled(): void
+    {
+        $this->app->detectEnvironment(fn () => 'production');
+        config(['app.debug' => true]);
+
+        $this->getJson('/api/v1/health')
+            ->assertStatus(200)
+            ->assertJsonMissingPath('runtime')
+            ->assertJsonMissingPath('diagnostics');
+    }
+
+    public function test_failed_health_response_does_not_echo_query_string_and_is_localized(): void
+    {
+        config(['app.debug' => false]);
+        config(['database.connections.mysql.host' => '127.0.0.1']);
+        config(['database.connections.mysql.port' => '59999']);
+        DB::purge('mysql');
+
+        $this->getJson('/api/v1/health?token=example-sensitive-value', ['Accept-Language' => 'ar'])
+            ->assertStatus(503)
+            ->assertJsonPath('instance', '/api/v1/health')
+            ->assertJsonPath('detail', 'تعذر التحقق من جاهزية إحدى خدمات النظام الأساسية.')
+            ->assertHeader('Content-Language', 'ar');
+    }
 }
