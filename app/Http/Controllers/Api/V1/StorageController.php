@@ -65,7 +65,7 @@ class StorageController extends Controller
         $disk = $validated['disk'];
 
         if (! Storage::disk($disk)->exists($path)) {
-            throw ApiException::notFound("File not found on storage disk [{$disk}]: [{$path}]");
+            throw ApiException::notFound(__('api.storage_file_missing'));
         }
 
         // Audit event for verified file download
@@ -112,6 +112,6 @@ class StorageController extends Controller
         }
 
         // Deny all other access
-        throw ApiException::forbidden("You are not authorized to access storage assets belonging to user ID [{$targetOwnerId}].");
+        throw ApiException::forbidden(__('api.storage_access_denied'));
     }
 }

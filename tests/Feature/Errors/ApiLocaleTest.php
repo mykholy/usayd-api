@@ -3,6 +3,7 @@
 namespace Tests\Feature\Errors;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Arr;
 use Tests\TestCase;
 
 class ApiLocaleTest extends TestCase
@@ -30,9 +31,23 @@ class ApiLocaleTest extends TestCase
 
     public function test_api_message_catalogues_have_identical_keys(): void
     {
-        $this->assertSame(
-            array_keys(require lang_path('en/api.php')),
-            array_keys(require lang_path('ar/api.php'))
-        );
+        foreach (['api', 'errors', 'identity', 'validation'] as $catalogue) {
+            $en = require lang_path("en/{$catalogue}.php");
+            $ar = require lang_path("ar/{$catalogue}.php");
+
+            $this->assertSame(array_keys(Arr::dot($en)), array_keys(Arr::dot($ar)), $catalogue);
+        }
+    }
+
+    public function test_storage_signature_error_is_localized(): void
+    {
+        $this->getJson('/api/v1/storage/download', ['Accept-Language' => 'ar'])
+            ->assertStatus(400)
+            ->assertJsonPath('detail', 'معلمات الرابط الموقع المطلوبة غير مكتملة.');
+
+        $this->getJson('/api/v1/storage/download', ['Accept-Language' => 'en'])
+            ->assertStatus(400)
+            ->assertJsonPath('detail', 'Missing required signed parameters (path, expires, signature).');
     }
 }
+

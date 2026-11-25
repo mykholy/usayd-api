@@ -25,7 +25,7 @@ class StoragePrivacyTest extends TestCase
         $learner = User::factory()->create(['role' => 'learner']);
         Sanctum::actingAs($learner, ['access-api']);
 
-        $response = $this->withHeaders(['Accept' => 'application/json'])
+        $response = $this->withHeaders(['Accept' => 'application/json', 'Accept-Language' => 'en'])
             ->postJson('/api/v1/storage/signed-url', [
                 'path' => "recitations/{$learner->id}/surah_001.mp3",
                 'expires_in' => 900,
@@ -60,7 +60,7 @@ class StoragePrivacyTest extends TestCase
         $learnerB = User::factory()->create(['role' => 'learner']);
         Sanctum::actingAs($learnerA, ['access-api']);
 
-        $response = $this->withHeaders(['Accept' => 'application/json'])
+        $response = $this->withHeaders(['Accept' => 'application/json', 'Accept-Language' => 'en'])
             ->postJson('/api/v1/storage/signed-url', [
                 'path' => "recitations/{$learnerB->id}/private_recitation.mp3",
                 'owner_id' => $learnerB->id,
@@ -88,7 +88,7 @@ class StoragePrivacyTest extends TestCase
 
         Sanctum::actingAs($teacher, ['access-api']);
 
-        $response = $this->withHeaders(['Accept' => 'application/json'])
+        $response = $this->withHeaders(['Accept' => 'application/json', 'Accept-Language' => 'en'])
             ->postJson('/api/v1/storage/signed-url', [
                 'path' => "recitations/{$student->id}/coached_audio.mp3",
                 'owner_id' => $student->id,
@@ -113,7 +113,7 @@ class StoragePrivacyTest extends TestCase
 
         Sanctum::actingAs($teacherA, ['access-api']);
 
-        $response = $this->withHeaders(['Accept' => 'application/json'])
+        $response = $this->withHeaders(['Accept' => 'application/json', 'Accept-Language' => 'en'])
             ->postJson('/api/v1/storage/signed-url', [
                 'path' => "recitations/{$student->id}/unassigned_audio.mp3",
                 'owner_id' => $student->id,
@@ -130,7 +130,7 @@ class StoragePrivacyTest extends TestCase
 
         Sanctum::actingAs($supervisor, ['access-api']);
 
-        $response = $this->withHeaders(['Accept' => 'application/json'])
+        $response = $this->withHeaders(['Accept' => 'application/json', 'Accept-Language' => 'en'])
             ->postJson('/api/v1/storage/signed-url', [
                 'path' => "recitations/{$student->id}/supervised_audio.mp3",
                 'owner_id' => $student->id,
@@ -178,7 +178,7 @@ class StoragePrivacyTest extends TestCase
         $expiredTime = now()->subMinutes(10)->timestamp;
         $signature = $service->createSignature($path, $expiredTime, null, 'private');
 
-        $response = $this->withHeaders(['Accept' => 'application/json'])
+        $response = $this->withHeaders(['Accept' => 'application/json', 'Accept-Language' => 'en'])
             ->getJson("/api/v1/storage/download?path={$path}&expires={$expiredTime}&signature={$signature}&disk=private");
 
         $response->assertStatus(403);
@@ -196,7 +196,7 @@ class StoragePrivacyTest extends TestCase
         // Tamper with signature
         $tamperedSignature = substr($signature, 0, -4).'AAAA';
 
-        $response = $this->withHeaders(['Accept' => 'application/json'])
+        $response = $this->withHeaders(['Accept' => 'application/json', 'Accept-Language' => 'en'])
             ->getJson("/api/v1/storage/download?path={$path}&expires={$expires}&signature={$tamperedSignature}&disk=private");
 
         $response->assertStatus(403);
@@ -216,7 +216,7 @@ class StoragePrivacyTest extends TestCase
         ];
 
         foreach ($traversalPaths as $badPath) {
-            $response = $this->withHeaders(['Accept' => 'application/json'])
+            $response = $this->withHeaders(['Accept' => 'application/json', 'Accept-Language' => 'en'])
                 ->postJson('/api/v1/storage/signed-url', [
                     'path' => $badPath,
                 ]);
@@ -233,7 +233,7 @@ class StoragePrivacyTest extends TestCase
         $expires = now()->addMinutes(15)->timestamp;
         $signature = $service->createSignature($path, $expires, null, 'private');
 
-        $response = $this->withHeaders(['Accept' => 'application/json'])
+        $response = $this->withHeaders(['Accept' => 'application/json', 'Accept-Language' => 'en'])
             ->getJson("/api/v1/storage/download?path={$path}&expires={$expires}&signature={$signature}&disk=private");
 
         $response->assertStatus(404);

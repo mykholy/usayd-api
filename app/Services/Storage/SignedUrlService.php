@@ -84,20 +84,20 @@ class SignedUrlService
         $disk = (string) ($request->query('disk') ?? 'private');
 
         if (! $path || ! $expires || ! $signature) {
-            throw new ApiException(400, 'BAD_REQUEST', 'Missing required signed parameters (path, expires, signature).');
+            throw new ApiException(400, 'BAD_REQUEST', __('api.storage_signed_parameters'));
         }
 
         $cleanPath = $this->sanitizePath($path);
 
         // Check expiration
         if (now()->timestamp > $expires) {
-            throw new ApiException(403, 'FORBIDDEN', 'The signed URL has expired.');
+            throw new ApiException(403, 'FORBIDDEN', __('api.storage_expired'));
         }
 
         // Verify cryptographic signature
         $expectedSignature = $this->createSignature($cleanPath, $expires, $ownerId, $disk);
         if (! hash_equals($expectedSignature, $signature)) {
-            throw new ApiException(403, 'FORBIDDEN', 'The signature is invalid or parameters have been tampered with.');
+            throw new ApiException(403, 'FORBIDDEN', __('api.storage_signature_invalid'));
         }
 
         return [
@@ -114,7 +114,7 @@ class SignedUrlService
     {
         // 1. Check for null bytes or illegal control characters
         if (str_contains($path, "\0") || preg_match('/[\x00-\x1F\x7F]/', $path)) {
-            throw new ApiException(400, 'BAD_REQUEST', 'Path contains illegal control characters.');
+            throw new ApiException(400, 'BAD_REQUEST', __('api.storage_control_characters'));
         }
 
         // 2. Normalize Windows backslashes to forward slashes
@@ -124,7 +124,7 @@ class SignedUrlService
         $segments = explode('/', $normalized);
         foreach ($segments as $segment) {
             if ($segment === '..') {
-                throw new ApiException(400, 'BAD_REQUEST', 'Path traversal sequences (..) are strictly prohibited.');
+                throw new ApiException(400, 'BAD_REQUEST', __('api.storage_traversal'));
             }
         }
 
@@ -132,7 +132,7 @@ class SignedUrlService
         $trimmed = trim($normalized, '/');
 
         if ($trimmed === '') {
-            throw new ApiException(400, 'BAD_REQUEST', 'Path cannot be empty.');
+            throw new ApiException(400, 'BAD_REQUEST', __('api.storage_empty_path'));
         }
 
         return $trimmed;
