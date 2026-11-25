@@ -91,7 +91,10 @@ class TransactionalOutboxService
             $scheduledAt
         ) {
             $result = $callback();
-            $this->record($eventType, $aggregateType, $aggregateId, $payload, $headers, $scheduledAt);
+            $message = $this->record($eventType, $aggregateType, $aggregateId, $payload, $headers, $scheduledAt);
+            if (! $message->wasRecentlyCreated) {
+                throw new InvalidArgumentException('Duplicate transactional outbox operation; the mutation was rolled back.');
+            }
 
             return $result;
         });
@@ -175,10 +178,14 @@ class TransactionalOutboxService
                             payload: $message->payload,
                             headers: $message->headers,
                             targetQueue: $targetQueue
-                        );
+                        )->beforeCommit();
                     }
 
-                    $message->markPublished();
+                    // A synchronous consumer may already have acknowledged the message.
+                    $message->refresh();
+                    if (! $message->isDelivered()) {
+                        $message->markPublished();
+                    }
                     $publishedCount++;
 
                     // Record publication audit event (distinguished from delivery)
@@ -208,7 +215,7 @@ class TransactionalOutboxService
                                 'aggregate_type' => $message->aggregate_type,
                                 'aggregate_id' => $message->aggregate_id,
                                 'attempts' => $message->attempts,
-                                'error' => substr($e->getMessage(), 0, 500),
+                                'error' => $message->error_message,
                             ],
                         ]);
                     }
@@ -224,27 +231,29 @@ class TransactionalOutboxService
      */
     public function replay(string $outboxMessageId): OutboxMessage
     {
-        $message = OutboxMessage::find($outboxMessageId);
-        if (! $message) {
-            throw new InvalidArgumentException("Outbox message with ID [{$outboxMessageId}] not found.");
-        }
+        return DB::transaction(function () use ($outboxMessageId): OutboxMessage {
+            $message = OutboxMessage::query()->lockForUpdate()->find($outboxMessageId);
+            if (! $message || ! $message->isDeadLetter()) {
+                throw new InvalidArgumentException("Outbox message [{$outboxMessageId}] is not eligible for dead-letter replay.");
+            }
 
-        $message->resetForReplay();
+            $message->resetForReplay();
 
-        AuditEvent::create([
-            'trace_id' => (string) Str::uuid(),
-            'subject_type' => 'outbox_replay',
-            'subject_id' => $message->id,
-            'action' => 'outbox_message_replayed',
-            'purpose' => 'Administrative replay of dead-lettered outbox message',
-            'metadata' => [
-                'event_type' => $message->event_type,
-                'aggregate_type' => $message->aggregate_type,
-                'aggregate_id' => $message->aggregate_id,
-            ],
-        ]);
+            AuditEvent::create([
+                'trace_id' => (string) Str::uuid(),
+                'subject_type' => 'outbox_replay',
+                'subject_id' => $message->id,
+                'action' => 'outbox_message_replayed',
+                'purpose' => 'Administrative replay of dead-lettered outbox message',
+                'metadata' => [
+                    'event_type' => $message->event_type,
+                    'aggregate_type' => $message->aggregate_type,
+                    'aggregate_id' => $message->aggregate_id,
+                ],
+            ]);
 
-        return $message;
+            return $message;
+        });
     }
 
     /**
@@ -252,25 +261,25 @@ class TransactionalOutboxService
      */
     public function replayAllDeadLetter(): int
     {
-        $messages = OutboxMessage::deadLetter()->get();
-        $count = 0;
+        return DB::transaction(function (): int {
+            $messages = OutboxMessage::deadLetter()->lockForUpdate()->get();
+            foreach ($messages as $message) {
+                $message->resetForReplay();
+            }
 
-        foreach ($messages as $message) {
-            $message->resetForReplay();
-            $count++;
-        }
+            $count = $messages->count();
+            if ($count > 0) {
+                AuditEvent::create([
+                    'trace_id' => (string) Str::uuid(),
+                    'subject_type' => 'outbox_replay',
+                    'subject_id' => 'batch',
+                    'action' => 'outbox_batch_replayed',
+                    'purpose' => "Administrative batch replay of [{$count}] dead-lettered outbox messages",
+                    'metadata' => ['replayed_count' => $count],
+                ]);
+            }
 
-        if ($count > 0) {
-            AuditEvent::create([
-                'trace_id' => (string) Str::uuid(),
-                'subject_type' => 'outbox_replay',
-                'subject_id' => 'batch',
-                'action' => 'outbox_batch_replayed',
-                'purpose' => "Administrative batch replay of [{$count}] dead-lettered outbox messages",
-                'metadata' => ['replayed_count' => $count],
-            ]);
-        }
-
-        return $count;
+            return $count;
+        });
     }
 }
