@@ -3,7 +3,7 @@
 USYD-T0022: Architecture Boundary & Repository Separation Verification Suite
 Validates modular monolith boundaries, zero cross-repo relative imports,
 domain contract isolation rules, and forbidden cross-module SQL/internal dependencies.
-Supports real source code AST/regex scanning and executable negative fixtures.
+Supports deterministic lexical source scanning and executable negative fixtures.
 """
 
 import os
@@ -37,11 +37,11 @@ CROSS_REPO_PATTERNS = [
 
 # Table ownership map for checking direct cross-module SQL access
 MODULE_TABLES = {
-    "Identity": {"users", "roles", "permissions", "sessions", "tokens", "guardians", "audit_events"},
+    "Identity": {"users", "roles", "permissions", "sessions", "tokens", "personal_access_tokens", "guardians", "audit_events"},
     "Payments": {"invoices", "payments", "transactions", "ledger_entries", "wallets"},
     "Booking": {"bookings", "schedules", "appointments", "slots"},
     "Classroom": {"rooms", "sessions_live", "attendance"},
-    "Learning": {"student_progress", "assessments", "curriculum_nodes"},
+    "Learning": {"learning_plans", "student_progress", "assessments", "curriculum_nodes"},
     "Quran": {"surahs", "ayahs", "recitations", "mushaf_pages"},
     "Payroll": {"payroll_records", "teacher_wages", "payouts"},
 }
@@ -227,9 +227,149 @@ def test_negative_executable_cross_module_fixtures():
         for v in violations:
             assert "LegalService.php" not in v["file"], f"False positive reported on LegalService.php: {v}"
 
-        print("  -> PASS (Executable negative fixture successfully verified AST/regex detection)")
+        print("  -> PASS (Executable negative fixture successfully verified lexical detection)")
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+
+# Explicit migration baseline: new dependencies may not be added to this list without an ADR.
+LEGACY_LAYER_DEPENDENCIES = {
+    "Modules/Learning/Application/Actions/OverrideLearningPlan.php": {r"App\Models\LearningPlan"},
+    "Modules/Learning/Application/Actions/UpdateLearningPlan.php": {r"App\Models\LearningPlan"},
+    "Modules/Learning/Application/DTOs/OverrideResult.php": {r"App\Models\LearningPlan"},
+    "Modules/Learning/Application/Ports/LearningPlanStore.php": {r"App\Models\LearningPlan"},
+    "Modules/Learning/Application/Queries/ShowLearningPlan.php": {r"App\Models\LearningPlan"},
+    "Platform/FeatureFlags/Application/ListFeatureFlags.php": {
+        r"App\Models\FeatureFlag", r"Illuminate\Database\Eloquent\Collection",
+    },
+    "Platform/FeatureFlags/Application/UpdateFeatureFlag.php": {
+        r"App\Exceptions\ApiException", r"App\Models\FeatureFlag",
+        r"App\Services\Audit\AuditLogger", r"App\Services\FeatureFlagService",
+        r"Illuminate\Support\Facades\DB",
+    },
+}
+
+QUALIFIED_NAME = re.compile(
+    r"(?<![\w\\])\\?(?:App|Illuminate|Laravel)\\(?:[A-Za-z_]\w*\\)*[A-Za-z_]\w*"
+)
+GROUP_IMPORT = re.compile(r"\buse\s+((?:App|Illuminate|Laravel)\\[\w\\]*)\\?\{([^}]+)\}\s*;", re.S)
+
+
+def php_dependency_names(source):
+    """Lexical names, including alias, fully-qualified and grouped references.
+
+    This is a deterministic source guard, not a PHP AST/type analysis.
+    """
+    source = re.sub(r"/\*.*?\*/|//[^\n]*", "", source, flags=re.S)
+
+    def expand_group(match):
+        prefix = match.group(1).rstrip("\\")
+        names = []
+        for entry in match.group(2).split(","):
+            item = entry.strip().split()
+            if item:
+                names.append(prefix + "\\" + item[0].lstrip("\\"))
+        return "; ".join(names)
+
+    source = GROUP_IMPORT.sub(expand_group, source)
+    return {m.group(0).lstrip("\\") for m in QUALIFIED_NAME.finditer(source)}
+
+
+def scan_layer_dependencies(app_dir):
+    violations = []
+    for section in ("Modules", "Platform"):
+        root = app_dir / section
+        if not root.is_dir():
+            continue
+        for fpath in root.rglob("*.php"):
+            relative = fpath.relative_to(app_dir).as_posix()
+            parts = relative.split("/")
+            if len(parts) < 4:
+                continue
+            owner, layer = parts[1], parts[2]
+            names = php_dependency_names(fpath.read_text(encoding="utf-8"))
+
+            for dependency in names:
+                segments = dependency.split("\\")
+                foreign_internal = (
+                    section == "Modules"
+                    and len(segments) >= 4
+                    and segments[:2] == ["App", "Modules"]
+                    and segments[2] != owner
+                    and segments[3] != "Contracts"
+                )
+                if foreign_internal:
+                    violations.append((relative, dependency, "CROSS_MODULE_INTERNAL_REFERENCE"))
+                    continue
+
+                if layer not in {"Application", "Domain", "Contracts"}:
+                    continue
+
+                same_namespace = segments[:3] == ["App", section, owner]
+                own_layer = same_namespace and len(segments) >= 4 and segments[3] == layer
+                if own_layer:
+                    continue
+
+                framework = segments[0] in {"Illuminate", "Laravel"}
+                legacy = dependency.startswith((
+                    "App\\Models\\", "App\\Services\\", "App\\Http\\", "App\\Exceptions\\",
+                ))
+                outer_layer = (
+                    len(segments) >= 4
+                    and segments[:2] in (["App", "Modules"], ["App", "Platform"])
+                    and segments[3] in {"Infrastructure", "Http"}
+                ) or dependency.startswith(("App\\Shared\\Infrastructure\\", "App\\Shared\\Http\\"))
+                application_dependency = (
+                    len(segments) >= 4 and segments[:2] in (["App", "Modules"], ["App", "Platform"])
+                    and segments[3] == "Application"
+                ) or dependency.startswith("App\\Shared\\Application\\")
+                contract_internal = (
+                    layer == "Contracts"
+                    and same_namespace
+                    and len(segments) >= 4
+                    and segments[3] != "Contracts"
+                )
+
+                forbidden = framework or legacy or outer_layer or contract_internal
+                if layer == "Domain":
+                    forbidden = forbidden or application_dependency
+
+                if forbidden and dependency not in LEGACY_LAYER_DEPENDENCIES.get(relative, set()):
+                    violations.append((relative, dependency, "LAYER_DEPENDENCY"))
+
+    return sorted(violations)
+
+
+def test_positive_layer_dependencies():
+    print("[TEST] test_positive_layer_dependencies...")
+    violations = scan_layer_dependencies(REPO_ROOT / "app")
+    assert not violations, f"Layer dependency violations: {violations}"
+    print("  -> PASS (Layer dependency guard; explicit migration baseline remains)")
+
+
+def test_negative_layer_dependencies():
+    print("[TEST] test_negative_layer_dependencies...")
+    with tempfile.TemporaryDirectory(prefix="usayd_layers_") as path:
+        app = Path(path)
+        samples = {
+            "Modules/Identity/Domain/Bad.php": r"<?php use Illuminate\Support\Facades\DB as Database;",
+            "Modules/Identity/Application/Bad.php": r"<?php $model = \App\Models\User::query();",
+            "Modules/Identity/Contracts/Bad.php": r"<?php use App\Modules\Identity\Infrastructure\Store;",
+            "Modules/Identity/Contracts/Foreign.php": r"<?php use App\Modules\Payments\{Contracts\Gateway, Infrastructure\Adapter};",
+            "Platform/FeatureFlags/Domain/Bad.php": r"<?php use App\Platform\FeatureFlags\Application\UpdateFeatureFlag;",
+            "Modules/Identity/Application/Good.php": r"<?php use App\Modules\Payments\Contracts\Gateway;",
+        }
+        for relative, content in samples.items():
+            target = app / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+
+        violations = scan_layer_dependencies(app)
+        assert len(violations) == 5, f"Expected five layer violations: {violations}"
+        assert not any("Good.php" in v[0] for v in violations)
+        print("  -> PASS (Alias, FQ name, group import, contract and platform negative fixtures)")
+
 
 
 def run_all_tests():
@@ -241,8 +381,10 @@ def run_all_tests():
     test_positive_zero_cross_repo_imports()
     test_positive_real_modules_boundary_check()
     test_negative_executable_cross_module_fixtures()
+    test_positive_layer_dependencies()
+    test_negative_layer_dependencies()
     print("==================================================")
-    print(" ALL 4 ARCHITECTURE BOUNDARY TESTS PASSED (0 FAIL)")
+    print(" ALL 6 ARCHITECTURE BOUNDARY TESTS PASSED (0 FAIL)")
     print("==================================================")
 
 

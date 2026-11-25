@@ -18,3 +18,6 @@
 - Every PR: Pint, architecture scanner, real MySQL/Redis suite, OpenAPI validation, negative security tests and authorized review. No fabricated test results. CI gates must fail closed.
 - Follow-up: migrate Identity, storage ownership, feature flags, observability, idempotency, outbox; introduce compatible PHPStan/Larastan and dependency analysis; remove transitional dependencies and expand scanner coverage to every layer.
 - Update API documentation and OpenAPI on each public contract change. Never merge with pending/failed required checks.
+
+### Enforced layer dependency guard
+The architecture verification script now checks qualified references (including grouped imports, aliases, and fully-qualified names) for Domain, Application and Contracts under Modules and Platform. Domain cannot import Application or framework/infrastructure code; Application cannot import HTTP or infrastructure; Contracts must not expose own internal types. Cross-module internal references are also checked inside Contracts. Existing Learning Eloquent references and FeatureFlags application persistence/facade references are explicitly baselined per file and symbol; do not expand this baseline. The lexical scanner is not a substitute for PHPStan/Larastan or Deptrac; these remain follow-up dependency work. Negative fixtures verify the guard actually rejects violations.
