@@ -21,13 +21,15 @@ class QueueMetricsService
     {
         $connectionName = config('queue.default');
         $queueDepths = [];
+        $unavailable = [];
 
         foreach (self::PARTITIONS as $partition) {
             try {
                 $queueDepths[$partition] = Queue::connection($connectionName)->size($partition);
             } catch (\Throwable) {
-                // If connection is sync or redis unavailable during inspection, report 0
+                // Preserve numeric depths for existing clients; explicitly report unknown partitions.
                 $queueDepths[$partition] = 0;
+                $unavailable[] = $partition;
             }
         }
 
@@ -35,12 +37,13 @@ class QueueMetricsService
         $recentFailed = DB::table('failed_jobs')
             ->orderByDesc('failed_at')
             ->limit(5)
-            ->get(['id', 'uuid', 'queue', 'failed_at', 'exception']);
+            ->get(['id', 'uuid', 'queue', 'failed_at']);
 
         return [
-            'status' => $failedCount > 50 ? 'degraded' : 'healthy',
+            'status' => $failedCount > 50 || $unavailable !== [] ? 'degraded' : 'healthy',
             'default_connection' => $connectionName,
             'partitions' => $queueDepths,
+            'unavailable_partitions' => $unavailable,
             'failed_jobs' => [
                 'total' => $failedCount,
                 'recent' => $recentFailed->map(fn ($job) => [
@@ -48,7 +51,7 @@ class QueueMetricsService
                     'uuid' => $job->uuid,
                     'queue' => $job->queue,
                     'failed_at' => $job->failed_at,
-                    'exception_summary' => strtok((string) $job->exception, "\n"),
+                    'exception_summary' => __('api.queue_failure_summary'),
                 ])->all(),
             ],
             'timestamp' => now()->toIso8601String(),

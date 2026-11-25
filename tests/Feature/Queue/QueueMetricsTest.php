@@ -2,8 +2,11 @@
 
 namespace Tests\Feature\Queue;
 
+use App\Models\User;
+use App\Services\Auth\TokenService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -42,6 +45,7 @@ class QueueMetricsTest extends TestCase
         ]);
 
         $this->assertSame(1, $response->json('data.failed_jobs.total'));
+        $this->assertStringNotContainsString('TwilioConnectionException', (string) $response->getContent());
         $this->assertArrayHasKey('high', $response->json('data.partitions'));
         $this->assertArrayHasKey('default', $response->json('data.partitions'));
         $this->assertArrayHasKey('notifications', $response->json('data.partitions'));
@@ -67,5 +71,47 @@ class QueueMetricsTest extends TestCase
 
         $response->assertStatus(200)
             ->assertJsonPath('status', 'success');
+    }
+
+    public function test_admin_access_token_is_allowed_but_refresh_token_is_not(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        $tokens = app(TokenService::class)->issueTokens($admin);
+        config(['services.ops.token' => null]);
+
+        $this->withToken($tokens['access_token'])->getJson('/api/v1/queue/metrics')
+            ->assertStatus(200);
+
+        $this->app['auth']->forgetGuards();
+        $this->withToken($tokens['refresh_token'])->getJson('/api/v1/queue/metrics')
+            ->assertStatus(403);
+    }
+
+    public function test_suspended_admin_and_learner_are_denied(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        $learner = User::factory()->create(['role' => 'learner']);
+        $adminTokens = app(TokenService::class)->issueTokens($admin);
+        $learnerTokens = app(TokenService::class)->issueTokens($learner);
+        $admin->update(['status' => 'suspended']);
+        config(['services.ops.token' => null]);
+
+        $this->withToken($adminTokens['access_token'])->getJson('/api/v1/queue/metrics')
+            ->assertStatus(403);
+
+        $this->app['auth']->forgetGuards();
+        $this->withToken($learnerTokens['access_token'])->getJson('/api/v1/queue/metrics')
+            ->assertStatus(403);
+    }
+
+    public function test_queue_connection_failure_is_reported_as_degraded(): void
+    {
+        Queue::shouldReceive('connection')->andThrow(new \RuntimeException('Simulated outage'));
+        config(['services.ops.token' => 'test-ops-token']);
+
+        $this->withToken('test-ops-token')->getJson('/api/v1/queue/metrics')
+            ->assertStatus(200)
+            ->assertJsonPath('data.status', 'degraded')
+            ->assertJsonCount(4, 'data.unavailable_partitions');
     }
 }
