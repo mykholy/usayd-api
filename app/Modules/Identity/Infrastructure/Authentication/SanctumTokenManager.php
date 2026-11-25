@@ -7,7 +7,6 @@ namespace App\Modules\Identity\Infrastructure\Authentication;
 use App\Models\User;
 use App\Modules\Identity\Application\Ports\TokenManager;
 use App\Services\Auth\TokenService;
-use Laravel\Sanctum\PersonalAccessToken;
 
 final readonly class SanctumTokenManager implements TokenManager
 {
@@ -23,7 +22,7 @@ final readonly class SanctumTokenManager implements TokenManager
         return $this->tokens->rotateRefreshToken($refreshToken, $deviceName);
     }
 
-    public function revoke(int $accountId, bool $allDevices, ?int $tokenId): void
+    public function revoke(int $accountId, bool $allDevices, ?int $tokenId, ?string $tokenName): void
     {
         $user = User::query()->findOrFail($accountId);
 
@@ -33,14 +32,8 @@ final readonly class SanctumTokenManager implements TokenManager
             return;
         }
 
-        if ($tokenId === null) {
-            return;
-        }
-
-        $token = $user->tokens()->find($tokenId);
-
-        if ($token instanceof PersonalAccessToken) {
-            $this->tokens->revokeDeviceToken($user, $token);
+        if ($tokenId !== null && $tokenName !== null) {
+            $this->tokens->revokeAuthenticatedToken($user, $tokenId, $tokenName);
         }
     }
 }
