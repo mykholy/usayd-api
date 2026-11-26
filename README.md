@@ -120,3 +120,7 @@ Detailed in [`docs/architecture/QUEUE_AND_FAILED_JOB_LIFECYCLE.md`](docs/archite
 ## 8. Dependency security and SBOM
 
 See [Supply chain security](docs/operations/SUPPLY_CHAIN_SECURITY.md) for locked dependency audit, secret scanning, Dependabot configuration and CI-published Composer component inventory. Do not treat missing audit or scanning results as a pass.
+
+## 9. Published API contract and SDK compatibility
+
+See [Contract publication](docs/api/CONTRACT_PUBLICATION.md) for the implemented OpenAPI artifact, version and SHA256 checks, conservative v1 compatibility gate, and consumer SDK generation policy. Planning and proposed operations are not implemented contracts.
