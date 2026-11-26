@@ -41,7 +41,7 @@ jobs:
       USAYD_REQUIRE_S3_TESTS: '1'
       USAYD_REQUIRE_CLAMAV_TESTS: '1'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
