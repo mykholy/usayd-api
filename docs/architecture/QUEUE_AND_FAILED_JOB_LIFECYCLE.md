@@ -4,7 +4,7 @@
 
 ## 1. Overview & Architectural Invariants
 
-Usayd Academy utilizes **Redis 7.4** with **Laravel Horizon** as the primary asynchronous processing engine, backed by **MySQL 8.4** for immutable failed-job retention (`failed_jobs`) and transactional batching (`job_batches`).
+Usayd Academy currently uses **Redis 7.4** and built-in Laravel queue workers, backed by **MySQL 8.4** for immutable failed-job retention (`failed_jobs`) and transactional batching (`job_batches`).
 
 ### Key Invariants:
 1. **Transactional Dispatch (`after_commit => true`):** Jobs are only published to Redis after the database transaction has successfully committed. This eliminates race conditions where workers attempt to fetch records that do not yet exist.
@@ -25,9 +25,9 @@ Usayd Academy utilizes **Redis 7.4** with **Laravel Horizon** as the primary asy
 
 ---
 
-## 3. Horizon Supervisor Configuration (`config/horizon.php`)
+## 3. Horizon Supervisor Configuration (`config/horizon.php`) — planned, not installed
 
-Laravel Horizon balances and auto-scales workers across partitions:
+The configuration is present but `laravel/horizon` is absent from composer.lock. The following is intended configuration, not a running supervisor or approved retention policy. Do not invoke Horizon or adopt its timeout settings without a separate tested rollout.
 - **Balance Strategy:** `auto` (allocates worker processes to queues with highest wait time).
 - **Auto-Scaling:**
   - `production`: Min 4 workers, Max 20 workers.
@@ -37,10 +37,12 @@ Laravel Horizon balances and auto-scales workers across partitions:
 
 ---
 
+Worker timeout must be strictly below the corresponding queue `retry_after`; the values in the partition table are retry_after limits, not validated worker timeouts. See [Local operations](../operations/LOCAL_OPERATIONS.md).
+
 ## 4. Dead-Letter Review & Operational Replay
 
 Administrators and operators can inspect, review, and replay terminal failed jobs via:
-1. **CLI Command:**
+1. **CLI Command:** Restricted operators only. Inspect output may include sensitive exception details; redact evidence. No bulk replay or flush without separate authorization.
    ```bash
    # List recent dead-letter jobs
    php artisan usayd:queue-dead-letter --action=list
@@ -48,7 +50,7 @@ Administrators and operators can inspect, review, and replay terminal failed job
    # Inspect failed job details and exception trace
    php artisan usayd:queue-dead-letter --action=inspect --id=<UUID>
 
-   # Retry a failed job
+   # Retry a specific failed job only after authorized idempotency review
    php artisan usayd:queue-dead-letter --action=retry --id=<UUID>
    ```
 2. **Metrics API Endpoint:**
