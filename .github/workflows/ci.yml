@@ -38,6 +38,7 @@ jobs:
       QUEUE_CONNECTION: redis
       REDIS_HOST: 127.0.0.1
       USAYD_REQUIRE_REDIS_TESTS: '1'
+      USAYD_REQUIRE_S3_TESTS: '1'
     steps:
       - uses: actions/checkout@v4
 
@@ -82,8 +83,23 @@ jobs:
       - name: Verify Redis queues & failed-job lifecycle
         run: python scripts/verify_queue_lifecycle.py
 
+      - name: Start isolated S3-compatible test service
+        run: |
+          set -euo pipefail
+          docker run -d --name usayd-ci-s3 \
+            -p 127.0.0.1:9000:9000 \
+            -e MINIO_ROOT_USER=usayd-ci-access \
+            -e MINIO_ROOT_PASSWORD=usayd-ci-test-secret \
+            minio/minio:RELEASE.2025-04-22T22-12-26Z-cpuv1 server /data
+          curl --fail --silent --show-error --retry 20 --retry-delay 2 --retry-connrefused \
+            http://127.0.0.1:9000/minio/health/live
+
       - name: Execute PHPUnit test suite
         run: php artisan test
 
       - name: OpenAPI Contract Validation
         run: bash scripts/check-openapi.sh
+
+      - name: Remove isolated S3-compatible test service
+        if: always()
+        run: docker rm -f usayd-ci-s3 || true
