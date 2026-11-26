@@ -42,6 +42,9 @@ jobs:
       USAYD_REQUIRE_CLAMAV_TESTS: '1'
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Require complete Laravel application
         run: |
@@ -119,6 +122,30 @@ jobs:
 
       - name: OpenAPI Contract Validation
         run: bash scripts/check-openapi.sh
+
+      - name: Verify compatibility and package implemented contract
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "Missing comparison baseline"; exit 1; }
+          scratch="$(mktemp -d)"
+          trap 'rm -rf "$scratch"' EXIT
+          git show "$BASE_SHA:docs/api/implemented.openapi.json" > "$scratch/baseline.json"
+          python3 -m unittest discover -s scripts/tests -p test_contract_publication.py
+          python3 scripts/publish_api_contract.py --baseline "$scratch/baseline.json" \
+            --current docs/api/implemented.openapi.json --commit "$(git rev-parse HEAD)" \
+            --output "$RUNNER_TEMP/usayd-contract"
+          cd "$RUNNER_TEMP/usayd-contract"
+          sha256sum --check SHA256SUMS
+
+      - name: Publish verified contract artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: usayd-api-contract-${{ github.sha }}
+          path: ${{ runner.temp }}/usayd-contract/
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Remove isolated S3-compatible test service
         if: always()
