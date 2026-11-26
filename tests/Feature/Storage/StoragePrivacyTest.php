@@ -171,6 +171,33 @@ class StoragePrivacyTest extends TestCase
         ]);
     }
 
+    public function test_private_download_cannot_be_rendered_or_cached_as_active_content(): void
+    {
+        $actor = User::factory()->create(['role' => 'learner']);
+        Sanctum::actingAs($actor, ['access-api']);
+
+        $path = "recitations/{$actor->id}/untrusted.html";
+        $content = '<html><body>Untrusted content</body></html>';
+        Storage::disk('private')->put($path, $content);
+
+        $signed = $this->postJson('/api/v1/storage/signed-url', [
+            'path' => $path,
+        ])->assertOk();
+
+        $query = parse_url($signed->json('data.url'), PHP_URL_QUERY);
+        $response = $this->get('/api/v1/storage/download?'.$query);
+
+        $response->assertOk()
+            ->assertHeader('Content-Type', 'application/octet-stream')
+            ->assertHeader('X-Content-Type-Options', 'nosniff')
+            ->assertHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
+            ->assertStreamedContent($content);
+
+        $this->assertStringStartsWith('attachment;', (string) $response->headers->get('Content-Disposition'));
+        $this->assertStringContainsString('no-store', (string) $response->headers->get('Cache-Control'));
+        $this->assertStringContainsString('private', (string) $response->headers->get('Cache-Control'));
+    }
+
     public function test_expired_signed_url_returns_403_problem_details(): void
     {
         $service = app(SignedUrlService::class);
