@@ -38,6 +38,8 @@ jobs:
       QUEUE_CONNECTION: redis
       REDIS_HOST: 127.0.0.1
       USAYD_REQUIRE_REDIS_TESTS: '1'
+      USAYD_REQUIRE_S3_TESTS: '1'
+      USAYD_REQUIRE_CLAMAV_TESTS: '1'
     steps:
       - uses: actions/checkout@v4
 
@@ -82,8 +84,30 @@ jobs:
       - name: Verify Redis queues & failed-job lifecycle
         run: python scripts/verify_queue_lifecycle.py
 
+      - name: Start isolated S3-compatible test service
+        run: |
+          set -euo pipefail
+          docker run -d --name usayd-ci-s3 \
+            -p 127.0.0.1:9000:8333 \
+            -e AWS_ACCESS_KEY_ID=usayd-ci-access \
+            -e AWS_SECRET_ACCESS_KEY=usayd-ci-test-secret \
+            chrislusf/seaweedfs:4.54
+          curl --fail --silent --show-error --retry 20 --retry-delay 2 --retry-all-errors \
+            --max-time 5 --aws-sigv4 'aws:amz:us-east-1:s3' \
+            --user 'usayd-ci-access:usayd-ci-test-secret' http://127.0.0.1:9000/
+
+      - name: Install ClamAV engine for synthetic-signature tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clamav
+          clamscan --version
+
       - name: Execute PHPUnit test suite
         run: php artisan test
 
       - name: OpenAPI Contract Validation
         run: bash scripts/check-openapi.sh
+
+      - name: Remove isolated S3-compatible test service
+        if: always()
+        run: docker rm -f usayd-ci-s3 || true
