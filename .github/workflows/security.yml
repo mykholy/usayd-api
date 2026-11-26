@@ -1,0 +1,62 @@
+name: Supply chain security
+on:
+  pull_request:
+  push:
+    branches: [main]
+  merge_group:
+permissions:
+  contents: read
+jobs:
+  dependency-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          coverage: none
+      - name: Validate and audit locked dependencies
+        run: |
+          set -euo pipefail
+          composer --no-plugins --no-scripts validate --strict
+          composer --no-plugins --no-scripts audit --locked --no-interaction
+          git diff --exit-code -- composer.json composer.lock
+
+      - name: Verify secret scanner and scan reachable Git history
+        env:
+          GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:b109bc5f8f76a38196a3e413704fc5b9e3c32360bce4e4b603bd6f45b3721dbb
+        run: |
+          set -euo pipefail
+          docker pull "$GITLEAKS_IMAGE"
+          scratch="$(mktemp -d)"
+          trap 'rm -rf "$scratch"' EXIT
+          scan() {
+            docker run --rm --network none --user "$(id -u):$(id -g)" \
+              -v "$1:/scan:ro" "$GITLEAKS_IMAGE" "$2" --redact=100 --exit-code=42 /scan
+          }
+          printf '%s\n' 'synthetic clean fixture' > "$scratch/fixture.txt"
+          scan "$scratch" dir
+          # Deliberately synthetic format-only test key, never an actual credential.
+          printf 'aws_access_key_id=%s%s\n' 'AKIA' '7Q9X2M6P4V8N3R5T' > "$scratch/fixture.txt"
+          result=0
+          scan "$scratch" dir || result=$?
+          test "$result" -eq 42
+          docker run --rm --network none --user "$(id -u):$(id -g)" \
+            -v "$GITHUB_WORKSPACE:/scan:ro" "$GITLEAKS_IMAGE" git --redact=100 --log-opts=HEAD /scan
+
+      - name: Generate locked component SBOM
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s scripts/tests -p test_composer_sbom.py
+          python3 scripts/generate_composer_sbom.py --output "$RUNNER_TEMP/usayd-composer.cdx.json"
+      - name: Publish component inventory artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: usayd-composer-sbom
+          path: ${{ runner.temp }}/usayd-composer.cdx.json
+          if-no-files-found: error
+          retention-days: 14
