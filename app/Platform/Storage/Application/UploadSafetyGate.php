@@ -33,7 +33,7 @@ final readonly class UploadSafetyGate
 
         try {
             $verdict = $this->scanner->scan($content);
-        } catch (Throwable $exception) {
+        } catch (Throwable) {
             // Do not expose a scanner exception or potentially sensitive bytes.
             throw new UploadRejected(UploadRejected::SCAN_UNAVAILABLE);
         }
