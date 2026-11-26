@@ -41,7 +41,9 @@ php artisan migrate
 - **Root Health Alias:** `GET /api/health`
 - **Application Up Probe:** `GET /up`
 
-Returns HTTP 200 with JSON subsystem connectivity (database, redis, runtime latency). Returns HTTP 503 with RFC 7807 problem details if database connection fails.
+Returns HTTP 200 with JSON subsystem connectivity (database and Redis), or HTTP 503 with RFC 7807 problem details if database connectivity fails. A degraded Redis state can still return 200; deployment readiness must check the body, not just the status. Runtime diagnostics are local/testing only.
+
+For the staging/production release procedure, see [Release protocol](docs/operations/RELEASE_PROTOCOL.md). Run the strict, read-only readiness probe with `python3 scripts/verify_release_health.py https://<approved-api-origin>`. It rejects degraded responses, disconnected required services and exposed diagnostics.
 
 ---
 
