@@ -84,7 +84,12 @@ class StorageController extends Controller
             ],
         ]);
 
-        return Storage::disk($disk)->download($path);
+        return Storage::disk($disk)->download($path, null, [
+            'Content-Type' => 'application/octet-stream',
+            'X-Content-Type-Options' => 'nosniff',
+            'Cache-Control' => 'private, no-store',
+            'X-Robots-Tag' => 'noindex, nofollow, noarchive',
+        ]);
     }
 
     /**
