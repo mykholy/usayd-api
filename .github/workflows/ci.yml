@@ -66,6 +66,16 @@ jobs:
       - name: Prepare environment & generate application key
         run: cp .env.example .env && php artisan key:generate
 
+      - name: Verify documented operational bootstrap
+        run: |
+          set -euo pipefail
+          composer check-platform-reqs
+          python3 -m unittest discover -s scripts/tests -p test_operational_bootstrap.py
+          inventory="$(mktemp)"
+          trap 'rm -f "$inventory"' EXIT
+          php artisan list --format=json > "$inventory"
+          python3 scripts/verify_operational_bootstrap.py composer.lock "$inventory"
+
       - name: Grant MySQL privileges and enable log_bin_trust_function_creators
         run: mysql -h 127.0.0.1 -P 3306 -u root -proot_ci_password -e "SET GLOBAL log_bin_trust_function_creators = 1; GRANT ALL PRIVILEGES ON *.* TO 'usayd'@'%'; FLUSH PRIVILEGES;"
 
