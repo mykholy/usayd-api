@@ -70,5 +70,43 @@ class OpenApiContractTest(unittest.TestCase):
             lint(self.contract, self.routes)
 
 
+    def test_literal_ref_in_examples_and_schema_defaults_is_not_resolved(self):
+        self.operation["responses"]["200"]["content"] = {
+            "application/json": {
+                "schema": {"type": "object", "default": {"$ref": "literal"},
+                           "properties": {"default": {"type": "string"}}},
+                "examples": {"sample": {"value": {"$ref": "literal"}}},
+            }
+        }
+        self.assertEqual(lint(self.contract, self.routes), 1)
+
+    def test_referenced_path_item_matches_routes(self):
+        item = self.contract["paths"]["/api/v1/items/{id}"]
+        self.contract["components"] = {"pathItems": {"Item": item}}
+        self.contract["paths"]["/api/v1/items/{id}"] = {
+            "$ref": "#/components/pathItems/Item"
+        }
+        self.assertEqual(lint(self.contract, self.routes), 1)
+
+    def test_schema_property_named_default_still_validates_reference(self):
+        self.contract["components"] = {
+            "schemas": {"Thing": {"properties": {
+                "default": {"$ref": "#/components/schemas/Missing"}
+            }}}
+        }
+        with self.assertRaisesRegex(ValueError, "Unresolved reference"):
+            lint(self.contract, self.routes)
+
+    def test_cyclic_path_item_reference_fails(self):
+        self.contract["components"] = {"pathItems": {
+            "Loop": {"$ref": "#/components/pathItems/Loop"}
+        }}
+        self.contract["paths"]["/api/v1/items/{id}"] = {
+            "$ref": "#/components/pathItems/Loop"
+        }
+        with self.assertRaisesRegex(ValueError, "Cyclic path item reference"):
+            lint(self.contract, self.routes)
+
+
 if __name__ == "__main__":
     unittest.main()
