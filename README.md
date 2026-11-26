@@ -7,7 +7,7 @@
 ---
 
 ## 1. Overview
-The `usayd-api` repository houses the independent backend API server for Usayd Academy. It provides core identity, scheduling, booking, learning maps, supervisor operations, and payment management via strict, versioned REST endpoints (`/api/v1`) documented in `openapi.yaml`.
+The `usayd-api` repository houses the independent backend API server for Usayd Academy. It provides core identity, scheduling, booking, learning maps, supervisor operations, and payment management via strict, versioned REST endpoints (`/api/v1`) documented in `docs/api/implemented.openapi.json`. The root `openapi.yaml` describes the intended future contract, not implemented behavior.
 
 ---
 
@@ -28,8 +28,9 @@ composer install
 cp .env.example .env
 php artisan key:generate
 
-# 3. Run database migrations on MySQL 8.4
-php artisan migrate:fresh
+# 3. Configure a dedicated local MySQL 8.4 database in .env, then migrate
+php artisan migrate
+# Never use migrate:fresh against shared, staging, or production data.
 ```
 
 ---
@@ -50,13 +51,15 @@ Returns HTTP 200 with JSON subsystem connectivity (database, redis, runtime late
 # Validate composer configuration
 composer validate --strict
 
-# Run automated test battery against MySQL 8.4 service database
-php artisan test
+# Run automated test battery against isolated MySQL 8.4 and Redis 7.4 test services
+# Set DB_* and REDIS_* to your disposable test services before running.
+USAYD_REQUIRE_REDIS_TESTS=1 php artisan test
 
 # Verify code styling (Laravel Pint)
 ./vendor/bin/pint --test
 
-# Verify OpenAPI contract alignment
+# Verify implemented OpenAPI against production-registered routes; runs negative fixtures
+# Requires installed Composer dependencies and a configured local application.
 bash scripts/check-openapi.sh
 
 # Verify architecture domain boundaries
@@ -71,6 +74,9 @@ python scripts/verify_concurrency_harness.py
 # Verify Redis queue partitions & failed-job lifecycle
 python scripts/verify_queue_lifecycle.py
 ```
+
+
+CI fails closed if required bootstrap files are missing; no pre-bootstrap green fallback. The real Redis test uses unique keys and a dedicated queue, then removes them. Keep the test services isolated from shared environments. The OpenAPI lint checks local references, operation IDs, response status and descriptions, required path parameters, security scheme names and registered route parity, including absence of test routes in the production inventory. It is not a complete OpenAPI specification validator or an end-to-end compatibility test. Only the implemented contract is linted; proposed operations must not be promoted without approval.
 
 ---
 
