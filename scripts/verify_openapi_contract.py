@@ -26,15 +26,42 @@ def resolve(document, reference):
     return target
 
 
-def check_references(document, node):
+def check_references(document, node, named_map=False):
     if isinstance(node, dict):
-        if "$ref" in node:
+        if not named_map and "$ref" in node:
             resolve(document, node["$ref"])
-        for child in node.values():
-            check_references(document, child)
+        for key, child in node.items():
+            if not named_map:
+                if key in {"example", "default", "enum", "const", "value"}:
+                    continue
+                if key == "examples" and isinstance(child, list):
+                    continue
+                if key.startswith("x-"):
+                    continue
+            # Names in maps are identifiers, not object keywords (e.g. a
+            # schema property called "default" still contains a schema).
+            check_references(document, child, not named_map and key in {
+                "properties", "patternProperties", "$defs", "dependentSchemas",
+                "schemas", "responses", "parameters", "examples", "headers",
+                "requestBodies", "securitySchemes", "links", "callbacks",
+                "pathItems", "paths", "content",
+            } and isinstance(child, dict))
     elif isinstance(node, list):
         for child in node:
             check_references(document, child)
+
+
+def path_item(document, item, seen=None):
+    if "$ref" not in item:
+        return item
+    seen = set() if seen is None else seen
+    reference = item["$ref"]
+    require(reference not in seen, f"Cyclic path item reference: {reference}")
+    target = path_item(document, resolve(document, reference), seen | {reference})
+    siblings = {key: value for key, value in item.items() if key != "$ref"}
+    require(not (target.keys() & siblings.keys()),
+            f"Ambiguous referenced path item fields: {reference}")
+    return target | siblings
 
 
 def parameters(document, entries):
@@ -58,6 +85,7 @@ def lint(document, routes):
     schemes = document.get("components", {}).get("securitySchemes", {})
     for path, item in document["paths"].items():
         require(path.startswith("/api/"), f"Invalid API path: {path}")
+        item = path_item(document, item)
         common = parameters(document, item.get("parameters", []))
         for method, operation in item.items():
             if method in {"summary", "description", "parameters", "servers"} or method.startswith("x-"):
