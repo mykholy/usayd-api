@@ -91,7 +91,7 @@ jobs:
             -p 127.0.0.1:9000:9000 \
             -e MINIO_ROOT_USER=usayd-ci-access \
             -e MINIO_ROOT_PASSWORD=usayd-ci-test-secret \
-            minio/minio:RELEASE.2025-04-22T22-12-26Z-cpuv1 server /data
+            quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
           curl --fail --silent --show-error --retry 20 --retry-delay 2 --retry-connrefused \
             http://127.0.0.1:9000/minio/health/live
 
