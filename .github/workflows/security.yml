@@ -45,8 +45,29 @@ jobs:
           result=0
           scan "$scratch" dir || result=$?
           test "$result" -eq 42
+          mkdir "$scratch/report"
+          result=0
           docker run --rm --network none --user "$(id -u):$(id -g)" \
-            -v "$GITHUB_WORKSPACE:/scan:ro" "$GITLEAKS_IMAGE" git --redact=100 --log-opts=HEAD /scan
+            -v "$GITHUB_WORKSPACE:/scan:ro" -v "$scratch/report:/report" \
+            "$GITLEAKS_IMAGE" git --redact=100 --log-opts=HEAD \
+            --report-format=json --report-path=/report/findings.json /scan || result=$?
+          if [ "$result" -ne 0 ]; then
+            # Never print Secret, Match, surrounding source, or raw report.
+            python3 - "$scratch/report/findings.json" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+          path = Path(sys.argv[1])
+          if path.is_file():
+              for finding in json.loads(path.read_text()):
+                  print(json.dumps({key: finding.get(key) for key in (
+                      "RuleID", "File", "StartLine", "Commit", "Fingerprint"
+                  )}, ensure_ascii=True))
+          else:
+              print("Secret scanner failed without a diagnostic report.")
+          PY
+          fi
+          exit "$result"
 
       - name: Generate locked component SBOM
         run: |
