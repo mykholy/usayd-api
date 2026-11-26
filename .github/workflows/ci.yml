@@ -39,6 +39,7 @@ jobs:
       REDIS_HOST: 127.0.0.1
       USAYD_REQUIRE_REDIS_TESTS: '1'
       USAYD_REQUIRE_S3_TESTS: '1'
+      USAYD_REQUIRE_CLAMAV_TESTS: '1'
     steps:
       - uses: actions/checkout@v4
 
@@ -93,6 +94,12 @@ jobs:
             minio/minio:RELEASE.2025-04-22T22-12-26Z-cpuv1 server /data
           curl --fail --silent --show-error --retry 20 --retry-delay 2 --retry-connrefused \
             http://127.0.0.1:9000/minio/health/live
+
+      - name: Install ClamAV engine for synthetic-signature tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clamav
+          clamscan --version
 
       - name: Execute PHPUnit test suite
         run: php artisan test
