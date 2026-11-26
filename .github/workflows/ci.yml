@@ -37,6 +37,7 @@ jobs:
       CACHE_STORE: redis
       QUEUE_CONNECTION: redis
       REDIS_HOST: 127.0.0.1
+      USAYD_REQUIRE_REDIS_TESTS: '1'
     steps:
       - uses: actions/checkout@v4
 
