@@ -1,0 +1,6 @@
+# Reviewed historical false positives only; never add generic/path-wide ignores.
+# USYD-79: isolated SeaweedFS CI fixture, local loopback, no AWS account.
+70f4675f2b43d0f234988936b6aa7abe8ccb97f0:.github/workflows/ci.yml:curl-auth-user:95
+# USYD-79: matching synthetic idempotency_key values in MySQL uniqueness test.
+ca9c74050626489aa869b693a58b3290754c894b:tests/Feature/Outbox/TransactionalOutboxTest.php:generic-api-key:379
+ca9c74050626489aa869b693a58b3290754c894b:tests/Feature/Outbox/TransactionalOutboxTest.php:generic-api-key:390
