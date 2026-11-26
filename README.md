@@ -7,14 +7,14 @@
 ---
 
 ## 1. Overview
-The `usayd-api` repository houses the independent backend API server for Usayd Academy. It provides core identity, scheduling, booking, learning maps, supervisor operations, and payment management via strict, versioned REST endpoints (`/api/v1`) documented in `docs/api/implemented.openapi.json`. The root `openapi.yaml` describes the intended future contract, not implemented behavior.
+The `usayd-api` repository houses the independent backend API server for Usayd Academy. It currently exposes the implemented foundation and learning-plan endpoints listed in `docs/api/implemented.openapi.json`; scheduling, booking, payments and other planned modules are not implied to be implemented. The root `openapi.yaml` describes the intended future contract, not implemented behavior.
 
 ---
 
 ## 2. Setup & Local Development
 
 ### Prerequisites
-- PHP `>= 8.3` (PHP `8.4` recommended)
+- PHP 8.4.1 or later in the tested 8.4 series (current locked Symfony platform requirements)
 - Composer `2.x`
 - MySQL `8.4 LTS` (InnoDB strict SQL mode)
 - Redis `7.4`
@@ -25,8 +25,8 @@ The `usayd-api` repository houses the independent backend API server for Usayd A
 composer install
 
 # 2. Configure environment
-cp .env.example .env
-php artisan key:generate
+# Only for a new disposable environment; do not overwrite an existing .env or APP_KEY.
+if [ ! -f .env ]; then cp .env.example .env; php artisan key:generate; fi
 
 # 3. Configure a dedicated local MySQL 8.4 database in .env, then migrate
 php artisan migrate
@@ -106,13 +106,14 @@ Detailed in [`docs/architecture/CONCURRENCY_AND_IDEMPOTENCY.md`](docs/architectu
 
 ---
 
-## 7. Redis Queues, Horizon & Failed-Job Lifecycle
+## 7. Redis Queues & Failed-Job Lifecycle
 Detailed in [`docs/architecture/QUEUE_AND_FAILED_JOB_LIFECYCLE.md`](docs/architecture/QUEUE_AND_FAILED_JOB_LIFECYCLE.md).
 - **Queue Partitions:** `high`, `default`, `notifications`, `reports` isolated via Redis.
 - **Transactional Dispatch:** `after_commit => true` prevents race conditions.
 - **Retry & Backoff:** `BaseQueueJob` implements exponential backoff `[5, 15, 60]` seconds with 3 max attempts.
 - **Dead-Letter Review:** Terminal failures emit audit events and store full traces in `failed_jobs`; inspectable and replayable via `php artisan usayd:queue-dead-letter`.
-- **Operational Metrics:** `GET /api/v1/queue/metrics` reports partition depths and failure rates.
+- **Operational Metrics:** `GET /api/v1/queue/metrics` reports queue metrics subject to authorization.
+- Horizon config is present, but the package is not installed in the current lockfile; use built-in queue workers.
 
 
 
@@ -124,3 +125,7 @@ See [Supply chain security](docs/operations/SUPPLY_CHAIN_SECURITY.md) for locked
 ## 9. Published API contract and SDK compatibility
 
 See [Contract publication](docs/api/CONTRACT_PUBLICATION.md) for the implemented OpenAPI artifact, version and SHA256 checks, conservative v1 compatibility gate, and consumer SDK generation policy. Planning and proposed operations are not implemented contracts.
+
+## 10. Operational bootstrap and incident runbook
+
+See [Local operations](docs/operations/LOCAL_OPERATIONS.md) for safe local setup, platform checks, actual Artisan commands, incident triage and named-approver requirements. CI verifies the command inventory and platform requirements; staging is not provisioned.
