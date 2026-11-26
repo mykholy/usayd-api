@@ -41,7 +41,7 @@ jobs:
           printf '%s\n' 'synthetic clean fixture' > "$scratch/fixture.txt"
           scan "$scratch" dir
           # Deliberately synthetic format-only test key, never an actual credential.
-          printf 'aws_access_key_id=%s%s\n' 'AKIA' '7Q9X2M6P4V8N3R5T' > "$scratch/fixture.txt"
+          printf 'aws_access_key_id=%s%s\n' 'AKIA' 'Q7M2P4V6N3R5T7X2' > "$scratch/fixture.txt"
           result=0
           scan "$scratch" dir || result=$?
           test "$result" -eq 42
