@@ -116,3 +116,7 @@ Detailed in [`docs/architecture/QUEUE_AND_FAILED_JOB_LIFECYCLE.md`](docs/archite
 
 
 
+
+## 8. Dependency security and SBOM
+
+See [Supply chain security](docs/operations/SUPPLY_CHAIN_SECURITY.md) for locked dependency audit, secret scanning, Dependabot configuration and CI-published Composer component inventory. Do not treat missing audit or scanning results as a pass.
