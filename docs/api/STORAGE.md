@@ -9,3 +9,18 @@ This is an interim namespace-based safeguard, not a full asset registry. A futur
 Private downloads are sent as attachments with `application/octet-stream`, `X-Content-Type-Options: nosniff`, `Cache-Control: private, no-store`, and `X-Robots-Tag: noindex, nofollow, noarchive`. This prevents trusting client-supplied file extensions or object MIME metadata for browser rendering. It does not replace upload MIME validation, malware scanning, a retention schedule, or a verified S3-compatible deployment. Those remain required before USYD-71 can close; retention periods must follow approved purpose/consent policy.
 
 يتم إرسال الملفات الخاصة كمرفقات دون عرض المحتوى داخل المتصفح أو السماح بتخزينه مؤقتاً. لا يغني ذلك عن فحص الملفات عند الرفع وسياسة الاحتفاظ المعتمدة.
+
+
+## Upload safety boundary (USYD-71)
+
+`App\Platform\Storage\Application\UploadSafetyGate` is a framework-independent pre-persistence guard. The writer must enforce authentication, owner namespace, a server-owned per-purpose byte limit and MIME allowlist **before reading or allocating the upload**, then pass the exact bounded bytes to the guard. Persist those same bytes only after the guard returns a detected MIME type. Never use the client MIME or extension as proof of type. The guard is not a complete file-format parser; specific upload use cases must validate content structure as appropriate.
+
+The `MalwareScanner` port accepts those exact bytes and returns `Clean`, `Infected` or `Unavailable`. All non-clean results and scanner exceptions reject the upload. No production scanner implementation or success-by-default binding is installed by this PR. Do not expose an upload route or persist user files before a real scanner adapter (with bounded execution and fail-closed behavior), ownership authorization, localized error mapping and integration tests are in place. The unit tests use synthetic bytes and scanner test doubles; they are not evidence of a live antivirus service.
+
+Stable internal rejection reasons: `upload_size_invalid`, `upload_content_type_denied`, `upload_malware_detected`, `upload_scan_unavailable`. A future HTTP boundary must map these to localized, non-revealing problem details without returning scanner diagnostics or file bytes. No public endpoint or OpenAPI operation is introduced here.
+
+### Retention and S3 deployment — conditional owner decision, 2026-11-26
+
+AWS private S3 is the selected infrastructure direction. The project owner accepted proposed retention of lesson recordings (30 days), AI audio (7 days), and security logs (90 days), **subject to legal/DPO approval**. These categories and durations do not authorize processing, automatic deletion, or applying one TTL to every private object. Recording and AI audio collection remain off by default; require purpose-specific explicit consent and approval. Security-log retention belongs to the logging lifecycle, not a blanket S3 object lifecycle.
+
+Before production: install the official Flysystem S3 adapter using Composer and commit its consistent lockfile; verify private bucket/IAM/encryption configuration in an isolated test environment; verify actual object upload/download and denied public access; integrate a real malware scanner and test clean, infected and unavailable outcomes; obtain legal/DPO retention sign-off and document lifecycle exclusions and legal holds. No production AWS credentials, bucket, lifecycle rules or feature flags changed in this PR.
