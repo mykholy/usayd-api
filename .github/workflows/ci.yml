@@ -109,6 +109,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m unittest discover -s scripts/tests -p test_release_health.py
+          sed -i 's/^APP_DEBUG=.*/APP_DEBUG=false/' .env
+          grep -qx 'APP_DEBUG=false' .env
           APP_ENV=production APP_DEBUG=false php artisan serve --host=127.0.0.1 --port=8000 > /tmp/usayd-readiness.log 2>&1 &
           server=$!
           trap 'kill "$server" 2>/dev/null || true' EXIT
